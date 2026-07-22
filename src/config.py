@@ -34,10 +34,10 @@ MOD_ROLE_ID = int(os.getenv("MOD_ROLE_ID", 0)) or None
 AUTO_ROLE_ID = int(os.getenv("AUTO_ROLE_ID", 0)) or None  # رول تلقائي للأعضاء الجدد
 
 # ---------------------------------------------------------
-# مفاتيح خدمات خارجية (AI)
+# مفاتيح خدمات خارجية (AI عبر OpenRouter)
 # ---------------------------------------------------------
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-AI_MODEL = os.getenv("AI_MODEL", "claude-sonnet-4-6")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+AI_MODEL = os.getenv("AI_MODEL", "anthropic/claude-sonnet-4.5")
 
 # ---------------------------------------------------------
 # تخصيص الرسائل (عدّلها حسب هوية كل عميل/سيرفر)
