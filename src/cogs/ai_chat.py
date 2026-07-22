@@ -1,21 +1,28 @@
 """
-تكامل الذكاء الاصطناعي: أمر /ask يرسل السؤال لـ Claude API ويرجع الجواب.
-هذا الجزء "قابل للتبديل" بسهولة - بس تغير API key والـ prompt، مش المنطق.
+تكامل الذكاء الاصطناعي: أمر /ask يرسل السؤال لـ OpenRouter (متوافق مع صيغة OpenAI) ويرجع الجواب.
+هذا الجزء "قابل للتبديل" بسهولة - بس تغير الموديل بـ AI_MODEL، مش المنطق.
 """
 
 import logging
 
 import discord
-from anthropic import Anthropic
 from discord import app_commands
 from discord.ext import commands
+from openai import OpenAI
 
 import config
 from utils.checks import in_channel
 
 logger = logging.getLogger("bot")
 
-client = Anthropic(api_key=config.ANTHROPIC_API_KEY) if config.ANTHROPIC_API_KEY else None
+client = (
+    OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=config.OPENROUTER_API_KEY,
+    )
+    if config.OPENROUTER_API_KEY
+    else None
+)
 
 # عدّل هذا الـ prompt حسب شخصية/هوية البوت لكل عميل
 SYSTEM_PROMPT = (
@@ -34,22 +41,24 @@ class AIChat(commands.Cog):
     async def ask(self, interaction: discord.Interaction, question: str):
         if client is None:
             await interaction.response.send_message(
-                "⚠️ خدمة الذكاء الاصطناعي غير مفعّلة (لا يوجد مفتاح API).", ephemeral=True
+                "⚠️ خدمة الذكاء الاصطناعي غير مفعّلة (لا يوجد مفتاح OpenRouter API).", ephemeral=True
             )
             return
 
         await interaction.response.defer()
         try:
-            response = client.messages.create(
+            response = client.chat.completions.create(
                 model=config.AI_MODEL,
                 max_tokens=500,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": question}],
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": question},
+                ],
             )
-            answer = response.content[0].text
+            answer = response.choices[0].message.content
             await interaction.followup.send(answer)
         except Exception as e:
-            logger.error(f"خطأ باستدعاء AI API: {e}", exc_info=True)
+            logger.error(f"خطأ باستدعاء AI API عبر OpenRouter: {e}", exc_info=True)
             await interaction.followup.send("⚠️ صار خطأ أثناء التواصل مع خدمة الذكاء الاصطناعي، حاول لاحقاً.")
 
 
