@@ -1,5 +1,5 @@
 """
-أوامر عامة بسيطة: ping، info.
+أوامر عامة بسيطة: ping، info، say.
 """
 
 import discord
@@ -7,6 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
+from utils.checks import has_role_id
 
 
 class Utility(commands.Cog):
@@ -28,6 +29,27 @@ class Utility(commands.Cog):
         embed.add_field(name="السيرفرات", value=str(len(self.bot.guilds)))
         embed.add_field(name="الأوامر المتاحة", value="استخدم `/` لعرض كل الأوامر")
         await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="say", description="يخلي البوت يكتب رسالة بقناة محددة")
+    @app_commands.describe(channel="القناة المطلوب الإرسال فيها", message="نص الرسالة")
+    @has_role_id(config.MOD_ROLE_ID)
+    async def say(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        message: str,
+    ):
+        try:
+            await channel.send(message)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                f"🚫 ما عندي صلاحية أكتب بقناة {channel.mention}."
+            )
+            return
+
+        await interaction.response.send_message(
+            f"✅ تم إرسال الرسالة بقناة {channel.mention}."
+        )
 
 
 async def setup(bot: commands.Bot):
