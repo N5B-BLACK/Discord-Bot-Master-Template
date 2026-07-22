@@ -8,6 +8,7 @@ import json
 import os
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 import config
@@ -32,9 +33,9 @@ class Moderation(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def _log_action(self, ctx, action: str, member: discord.Member, reason: str):
+    async def _log_action(self, guild: discord.Guild, author, action: str, member: discord.Member, reason: str):
         if config.MOD_LOG_CHANNEL_ID:
-            channel = ctx.guild.get_channel(config.MOD_LOG_CHANNEL_ID)
+            channel = guild.get_channel(config.MOD_LOG_CHANNEL_ID)
             if channel:
                 embed = discord.Embed(
                     title=f"🔨 {action}",
@@ -42,64 +43,69 @@ class Moderation(commands.Cog):
                     timestamp=datetime.datetime.utcnow(),
                 )
                 embed.add_field(name="العضو", value=f"{member} ({member.id})")
-                embed.add_field(name="بواسطة", value=ctx.author.mention)
+                embed.add_field(name="بواسطة", value=author.mention)
                 embed.add_field(name="السبب", value=reason or "لم يُذكر", inline=False)
                 await channel.send(embed=embed)
 
-    @commands.command(name="kick")
+    @app_commands.command(name="kick", description="طرد عضو من السيرفر")
+    @app_commands.describe(member="العضو المطلوب طرده", reason="سبب الطرد")
     @has_role_id(config.MOD_ROLE_ID)
-    @commands.has_permissions(kick_members=True)
-    async def kick(self, ctx, member: discord.Member, *, reason: str = None):
+    @app_commands.checks.has_permissions(kick_members=True)
+    async def kick(self, interaction: discord.Interaction, member: discord.Member, reason: str = None):
         await member.kick(reason=reason)
-        await ctx.send(f"👢 تم طرد {member.mention}. السبب: {reason or 'لم يُذكر'}")
-        await self._log_action(ctx, "Kick", member, reason)
+        await interaction.response.send_message(f"👢 تم طرد {member.mention}. السبب: {reason or 'لم يُذكر'}")
+        await self._log_action(interaction.guild, interaction.user, "Kick", member, reason)
 
-    @commands.command(name="ban")
+    @app_commands.command(name="ban", description="حظر عضو من السيرفر")
+    @app_commands.describe(member="العضو المطلوب حظره", reason="سبب الحظر")
     @has_role_id(config.MOD_ROLE_ID)
-    @commands.has_permissions(ban_members=True)
-    async def ban(self, ctx, member: discord.Member, *, reason: str = None):
+    @app_commands.checks.has_permissions(ban_members=True)
+    async def ban(self, interaction: discord.Interaction, member: discord.Member, reason: str = None):
         await member.ban(reason=reason)
-        await ctx.send(f"🔨 تم حظر {member.mention}. السبب: {reason or 'لم يُذكر'}")
-        await self._log_action(ctx, "Ban", member, reason)
+        await interaction.response.send_message(f"🔨 تم حظر {member.mention}. السبب: {reason or 'لم يُذكر'}")
+        await self._log_action(interaction.guild, interaction.user, "Ban", member, reason)
 
-    @commands.command(name="mute")
+    @app_commands.command(name="mute", description="إسكات عضو مؤقتاً")
+    @app_commands.describe(member="العضو المطلوب إسكاته", minutes="عدد الدقائق", reason="السبب")
     @has_role_id(config.MOD_ROLE_ID)
-    @commands.has_permissions(moderate_members=True)
-    async def mute(self, ctx, member: discord.Member, minutes: int = 10, *, reason: str = None):
+    @app_commands.checks.has_permissions(moderate_members=True)
+    async def mute(self, interaction: discord.Interaction, member: discord.Member, minutes: int = 10, reason: str = None):
         duration = datetime.timedelta(minutes=minutes)
         await member.timeout(duration, reason=reason)
-        await ctx.send(f"🔇 تم إسكات {member.mention} لمدة {minutes} دقيقة.")
-        await self._log_action(ctx, f"Mute ({minutes} min)", member, reason)
+        await interaction.response.send_message(f"🔇 تم إسكات {member.mention} لمدة {minutes} دقيقة.")
+        await self._log_action(interaction.guild, interaction.user, f"Mute ({minutes} min)", member, reason)
 
-    @commands.command(name="warn")
+    @app_commands.command(name="warn", description="تحذير عضو")
+    @app_commands.describe(member="العضو المطلوب تحذيره", reason="سبب التحذير")
     @has_role_id(config.MOD_ROLE_ID)
-    async def warn(self, ctx, member: discord.Member, *, reason: str = None):
+    async def warn(self, interaction: discord.Interaction, member: discord.Member, reason: str = None):
         data = _load_warnings()
-        guild_data = data.setdefault(str(ctx.guild.id), {})
+        guild_data = data.setdefault(str(interaction.guild.id), {})
         member_warnings = guild_data.setdefault(str(member.id), [])
         member_warnings.append(
-            {"reason": reason or "لم يُذكر", "by": ctx.author.id, "date": str(datetime.date.today())}
+            {"reason": reason or "لم يُذكر", "by": interaction.user.id, "date": str(datetime.date.today())}
         )
         _save_warnings(data)
 
-        await ctx.send(
+        await interaction.response.send_message(
             f"⚠️ تم تحذير {member.mention}. عدد التحذيرات الآن: {len(member_warnings)}"
         )
-        await self._log_action(ctx, "Warn", member, reason)
+        await self._log_action(interaction.guild, interaction.user, "Warn", member, reason)
 
-    @commands.command(name="warnings")
+    @app_commands.command(name="warnings", description="عرض تحذيرات عضو")
+    @app_commands.describe(member="العضو المطلوب عرض تحذيراته")
     @has_role_id(config.MOD_ROLE_ID)
-    async def list_warnings(self, ctx, member: discord.Member):
+    async def list_warnings(self, interaction: discord.Interaction, member: discord.Member):
         data = _load_warnings()
-        member_warnings = data.get(str(ctx.guild.id), {}).get(str(member.id), [])
+        member_warnings = data.get(str(interaction.guild.id), {}).get(str(member.id), [])
         if not member_warnings:
-            await ctx.send(f"✅ {member.mention} ما عنده أي تحذيرات.")
+            await interaction.response.send_message(f"✅ {member.mention} ما عنده أي تحذيرات.")
             return
 
         embed = discord.Embed(title=f"تحذيرات {member}", color=config.EMBED_COLOR)
         for i, w in enumerate(member_warnings, start=1):
             embed.add_field(name=f"#{i} - {w['date']}", value=w["reason"], inline=False)
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
 
 
 async def setup(bot: commands.Bot):
