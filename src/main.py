@@ -5,8 +5,10 @@
 
 import asyncio
 import logging
+import os
 
 import discord
+from aiohttp import web
 from discord.ext import commands
 
 import config
@@ -29,13 +31,12 @@ logger = logging.getLogger("bot")
 # إعداد الـ Intents (الصلاحيات اللي البوت محتاجها)
 # ---------------------------------------------------------
 intents = discord.Intents.default()
-intents.members = True          # لازم لأوامر الموديريشن والترحيب
-intents.message_content = True  # ما عاد ضروري إذا كل الأوامر صارت Slash، بس خليها إذا رح تحتاجها لميزة ثانية
+intents.members = True
+intents.message_content = True
 
 bot = commands.Bot(command_prefix=config.PREFIX, intents=intents)
 setup_error_handling(bot)
 
-# قائمة الـ Cogs (الملفات) اللي رح تنحمل - عطل/فعل حسب طلب كل عميل
 COGS = [
     "cogs.moderation",
     "cogs.welcome",
@@ -56,7 +57,7 @@ async def on_ready():
         logger.info(f"تمت مزامنة {len(synced)} أمر Slash على السيرفر المحدد")
     else:
         synced = await bot.tree.sync()
-        logger.info(f"تمت مزامنة {len(synced)} أمر Slash بشكل عام (قد تاخذ حتى ساعة للظهور بكل سيرفر)")
+        logger.info(f"تمت مزامنة {len(synced)} أمر Slash بشكل عام")
 
 
 async def load_cogs():
@@ -68,9 +69,30 @@ async def load_cogs():
             logger.error(f"فشل تحميل {cog}: {e}")
 
 
+# ---------------------------------------------------------
+# سيرفر ويب بسيط جدًا - بس عشان Render يعتبر الخدمة "شغالة"
+# و UptimeRobot يقدر يعمله ping. ما إله علاقة بمنطق البوت.
+# ---------------------------------------------------------
+async def health(request):
+    return web.Response(text="Bot is alive!")
+
+
+async def start_webserver():
+    app = web.Application()
+    app.router.add_get("/", health)
+    app.router.add_get("/health", health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))  # Render بيحدد PORT تلقائيًا
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"سيرفر الـ health check شغال على المنفذ {port}")
+
+
 async def main():
     async with bot:
         await load_cogs()
+        await start_webserver()
         await bot.start(config.TOKEN)
 
 
