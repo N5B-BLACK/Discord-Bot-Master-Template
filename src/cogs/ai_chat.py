@@ -1,11 +1,13 @@
 """
-تكامل الذكاء الاصطناعي: أمر !ask يرسل السؤال لـ Claude API ويرجع الجواب.
+تكامل الذكاء الاصطناعي: أمر /ask يرسل السؤال لـ Claude API ويرجع الجواب.
 هذا الجزء "قابل للتبديل" بسهولة - بس تغير API key والـ prompt، مش المنطق.
 """
 
 import logging
 
+import discord
 from anthropic import Anthropic
+from discord import app_commands
 from discord.ext import commands
 
 import config
@@ -26,26 +28,29 @@ class AIChat(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.command(name="ask")
+    @app_commands.command(name="ask", description="اسأل المساعد الذكي أي سؤال")
+    @app_commands.describe(question="سؤالك للذكاء الاصطناعي")
     @in_channel(config.AI_CHAT_CHANNEL_ID)
-    async def ask(self, ctx: commands.Context, *, question: str):
+    async def ask(self, interaction: discord.Interaction, question: str):
         if client is None:
-            await ctx.send("⚠️ خدمة الذكاء الاصطناعي غير مفعّلة (لا يوجد مفتاح API).")
+            await interaction.response.send_message(
+                "⚠️ خدمة الذكاء الاصطناعي غير مفعّلة (لا يوجد مفتاح API).", ephemeral=True
+            )
             return
 
-        async with ctx.typing():
-            try:
-                response = client.messages.create(
-                    model=config.AI_MODEL,
-                    max_tokens=500,
-                    system=SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": question}],
-                )
-                answer = response.content[0].text
-                await ctx.reply(answer)
-            except Exception as e:
-                logger.error(f"خطأ باستدعاء AI API: {e}", exc_info=True)
-                await ctx.send("⚠️ صار خطأ أثناء التواصل مع خدمة الذكاء الاصطناعي، حاول لاحقاً.")
+        await interaction.response.defer()
+        try:
+            response = client.messages.create(
+                model=config.AI_MODEL,
+                max_tokens=500,
+                system=SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": question}],
+            )
+            answer = response.content[0].text
+            await interaction.followup.send(answer)
+        except Exception as e:
+            logger.error(f"خطأ باستدعاء AI API: {e}", exc_info=True)
+            await interaction.followup.send("⚠️ صار خطأ أثناء التواصل مع خدمة الذكاء الاصطناعي، حاول لاحقاً.")
 
 
 async def setup(bot: commands.Bot):
