@@ -123,7 +123,20 @@ class SetupViewPage2(discord.ui.View):
             f"✅ تم تحديد رول الدعم: {role.mention}", ephemeral=True
         )
 
-    @discord.ui.button(label="◀️ رجوع", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        placeholder="7️⃣ اختر قناة لوج التذاكر (نسخ المحادثات المغلقة)",
+        channel_types=[discord.ChannelType.text],
+        row=2,
+    )
+    async def ticket_log_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        channel = select.values[0]
+        await update_guild_setting(interaction.guild_id, "ticket_log_channel_id", channel.id)
+        await interaction.response.send_message(
+            f"✅ تم تحديد قناة لوج التذاكر: {channel.mention}", ephemeral=True
+        )
+
+    @discord.ui.button(label="◀️ رجوع", style=discord.ButtonStyle.secondary, row=3)
     async def back_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embed=_page1_embed(), view=SetupViewPage1())
 
