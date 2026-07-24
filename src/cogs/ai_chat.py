@@ -1,6 +1,6 @@
 """
 تكامل الذكاء الاصطناعي: أمر /ask يرسل السؤال لـ OpenRouter (متوافق مع صيغة OpenAI) ويرجع الجواب.
-هذا الجزء "قابل للتبديل" بسهولة - بس تغير الموديل بـ AI_MODEL، مش المنطق.
+قناة الاستخدام مضبوطة لكل سيرفر عن طريق أمر /setup (مش قيمة ثابتة بالـ .env).
 """
 
 import logging
@@ -11,7 +11,7 @@ from discord.ext import commands
 from openai import OpenAI
 
 import config
-from utils.checks import in_channel
+from utils.checks import in_configured_channel
 
 logger = logging.getLogger("bot")
 
@@ -24,7 +24,6 @@ client = (
     else None
 )
 
-# عدّل هذا الـ prompt حسب شخصية/هوية البوت لكل عميل
 SYSTEM_PROMPT = (
     f"أنت {config.BOT_NAME}، مساعد ذكي داخل سيرفر ديسكورد. "
     "ردودك مختصرة، مفيدة، وودودة. لا تتجاوز 3-4 جمل في الرد ما لم يُطلب خلاف ذلك."
@@ -37,7 +36,7 @@ class AIChat(commands.Cog):
 
     @app_commands.command(name="ask", description="اسأل المساعد الذكي أي سؤال")
     @app_commands.describe(question="سؤالك للذكاء الاصطناعي")
-    @in_channel(config.AI_CHAT_CHANNEL_ID)
+    @in_configured_channel("ai_chat_channel_id")
     async def ask(self, interaction: discord.Interaction, question: str):
         if client is None:
             await interaction.response.send_message(
@@ -56,6 +55,7 @@ class AIChat(commands.Cog):
                 ],
             )
             answer = response.choices[0].message.content
+            logger.info(f"AI رد باستخدام الموديل: {response.model}")
             await interaction.followup.send(answer)
         except Exception as e:
             logger.error(f"خطأ باستدعاء AI API عبر OpenRouter: {e}", exc_info=True)
