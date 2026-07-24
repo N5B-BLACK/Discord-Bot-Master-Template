@@ -12,6 +12,7 @@ from aiohttp import web
 from discord.ext import commands
 
 import config
+from utils.db import check_connection
 from utils.error_handler import setup_error_handling
 
 # ---------------------------------------------------------
@@ -50,6 +51,12 @@ COGS = [
 async def on_ready():
     logger.info(f"✅ البوت شغال الآن باسم: {bot.user} (ID: {bot.user.id})")
     logger.info(f"متصل بـ {len(bot.guilds)} سيرفر")
+
+    try:
+        await check_connection()
+        logger.info("✅ الاتصال بقاعدة البيانات (MongoDB) شغال تمام")
+    except Exception as e:
+        logger.error(f"❌ فشل الاتصال بقاعدة البيانات: {e}")
 
     if config.GUILD_ID:
         guild = discord.Object(id=config.GUILD_ID)
