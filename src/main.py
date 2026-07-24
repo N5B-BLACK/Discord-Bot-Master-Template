@@ -44,6 +44,7 @@ COGS = [
     "cogs.ai_chat",
     "cogs.utility",
     "cogs.setup",
+    "cogs.tickets",
 ]
 
 
