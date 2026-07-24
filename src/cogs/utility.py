@@ -7,7 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils.checks import has_role_id
+from utils.checks import has_configured_role
 
 
 class Utility(commands.Cog):
@@ -32,7 +32,7 @@ class Utility(commands.Cog):
 
     @app_commands.command(name="say", description="يخلي البوت يكتب رسالة بقناة محددة")
     @app_commands.describe(channel="القناة المطلوب الإرسال فيها", message="نص الرسالة")
-    @has_role_id(config.MOD_ROLE_ID)
+    @has_configured_role("mod_role_id")
     async def say(
         self,
         interaction: discord.Interaction,
