@@ -28,6 +28,7 @@ DEFAULT_SETTINGS = {
     "auto_role_id": None,
     "ai_chat_channel_id": None,
     "ticket_support_role_id": None,
+    "ticket_log_channel_id": None,
 }
 
 
@@ -77,3 +78,21 @@ async def get_next_ticket_number(guild_id: int) -> int:
         return_document=ReturnDocument.AFTER,
     )
     return doc["count"]
+
+
+async def mark_ticket_closed(thread_id: int, delete_at) -> None:
+    """يسجل وقت إغلاق التذكرة، ووقت الحذف التلقائي المجدول (بعد 24 ساعة)."""
+    await _tickets.update_one(
+        {"thread_id": thread_id},
+        {"$set": {"delete_at": delete_at, "deleted": False}},
+    )
+
+
+async def get_tickets_due_for_deletion(now) -> list:
+    """يرجع كل التذاكر المغلقة اللي وصل وقت حذفها التلقائي ولسا ما انحذفت."""
+    cursor = _tickets.find({"delete_at": {"$lte": now}, "deleted": {"$ne": True}})
+    return await cursor.to_list(length=100)
+
+
+async def mark_ticket_deleted(thread_id: int) -> None:
+    await _tickets.update_one({"thread_id": thread_id}, {"$set": {"deleted": True}})
