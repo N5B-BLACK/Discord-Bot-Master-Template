@@ -1,6 +1,6 @@
 """
-أوامر الموديريشن الأساسية: kick, ban, timeout, warn.
-كل الأوامر محمية بفحص الرول (MOD_ROLE_ID من config).
+أوامر الموديريشن الأساسية: kick, ban, mute, warn.
+كل الأوامر محمية بفحص رول المشرفين المحدد لكل سيرفر (عن طريق أمر /setup)، مش قيمة ثابتة بالـ .env.
 """
 
 import datetime
@@ -12,7 +12,8 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils.checks import has_role_id
+from utils.checks import has_configured_role
+from utils.db import get_guild_settings
 
 WARNINGS_FILE = "warnings.json"
 
@@ -34,8 +35,10 @@ class Moderation(commands.Cog):
         self.bot = bot
 
     async def _log_action(self, guild: discord.Guild, author, action: str, member: discord.Member, reason: str):
-        if config.MOD_LOG_CHANNEL_ID:
-            channel = guild.get_channel(config.MOD_LOG_CHANNEL_ID)
+        settings = await get_guild_settings(guild.id)
+        log_channel_id = settings.get("mod_log_channel_id")
+        if log_channel_id:
+            channel = guild.get_channel(log_channel_id)
             if channel:
                 embed = discord.Embed(
                     title=f"🔨 {action}",
@@ -49,7 +52,7 @@ class Moderation(commands.Cog):
 
     @app_commands.command(name="kick", description="طرد عضو من السيرفر")
     @app_commands.describe(member="العضو المطلوب طرده", reason="سبب الطرد")
-    @has_role_id(config.MOD_ROLE_ID)
+    @has_configured_role("mod_role_id")
     @app_commands.checks.has_permissions(kick_members=True)
     async def kick(self, interaction: discord.Interaction, member: discord.Member, reason: str = None):
         await member.kick(reason=reason)
@@ -58,7 +61,7 @@ class Moderation(commands.Cog):
 
     @app_commands.command(name="ban", description="حظر عضو من السيرفر")
     @app_commands.describe(member="العضو المطلوب حظره", reason="سبب الحظر")
-    @has_role_id(config.MOD_ROLE_ID)
+    @has_configured_role("mod_role_id")
     @app_commands.checks.has_permissions(ban_members=True)
     async def ban(self, interaction: discord.Interaction, member: discord.Member, reason: str = None):
         await member.ban(reason=reason)
@@ -67,7 +70,7 @@ class Moderation(commands.Cog):
 
     @app_commands.command(name="mute", description="إسكات عضو مؤقتاً")
     @app_commands.describe(member="العضو المطلوب إسكاته", minutes="عدد الدقائق", reason="السبب")
-    @has_role_id(config.MOD_ROLE_ID)
+    @has_configured_role("mod_role_id")
     @app_commands.checks.has_permissions(moderate_members=True)
     async def mute(self, interaction: discord.Interaction, member: discord.Member, minutes: int = 10, reason: str = None):
         duration = datetime.timedelta(minutes=minutes)
@@ -77,7 +80,7 @@ class Moderation(commands.Cog):
 
     @app_commands.command(name="warn", description="تحذير عضو")
     @app_commands.describe(member="العضو المطلوب تحذيره", reason="سبب التحذير")
-    @has_role_id(config.MOD_ROLE_ID)
+    @has_configured_role("mod_role_id")
     async def warn(self, interaction: discord.Interaction, member: discord.Member, reason: str = None):
         data = _load_warnings()
         guild_data = data.setdefault(str(interaction.guild.id), {})
@@ -94,7 +97,7 @@ class Moderation(commands.Cog):
 
     @app_commands.command(name="warnings", description="عرض تحذيرات عضو")
     @app_commands.describe(member="العضو المطلوب عرض تحذيراته")
-    @has_role_id(config.MOD_ROLE_ID)
+    @has_configured_role("mod_role_id")
     async def list_warnings(self, interaction: discord.Interaction, member: discord.Member):
         data = _load_warnings()
         member_warnings = data.get(str(interaction.guild.id), {}).get(str(member.id), [])
