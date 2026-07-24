@@ -55,6 +55,26 @@ class CloseReasonModal(discord.ui.Modal, title="إغلاق التذكرة"):
             embed.add_field(name="السبب", value=reason_text, inline=False)
 
         await interaction.response.send_message(embed=embed)
+
+        # نحاول نبعت نفس معلومات الإغلاق لصاحب التذكرة عالخاص
+        ticket = await get_ticket(interaction.channel.id)
+        if ticket:
+            opener = interaction.guild.get_member(ticket["opener_id"])
+            if opener:
+                dm_embed = discord.Embed(
+                    title="🔒 تم إغلاق تذكرتك",
+                    description=f"تذكرتك بسيرفر **{interaction.guild.name}** انسكرت.",
+                    color=discord.Color.red(),
+                    timestamp=datetime.datetime.utcnow(),
+                )
+                dm_embed.add_field(name="بواسطة", value=str(interaction.user), inline=True)
+                if reason_text:
+                    dm_embed.add_field(name="السبب", value=reason_text, inline=False)
+                try:
+                    await opener.send(embed=dm_embed)
+                except discord.Forbidden:
+                    pass  # مسكر الـ DMs - ما في داعي نوقف عملية الإغلاق بسبب هيك
+
         await interaction.channel.edit(archived=True, locked=True)
 
 
