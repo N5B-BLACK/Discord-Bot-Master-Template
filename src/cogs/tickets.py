@@ -12,12 +12,22 @@
 """
 
 import datetime
+import io
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
-from utils.db import create_ticket, get_guild_settings, get_next_ticket_number, get_ticket, set_ticket_claim
+from utils.db import (
+    create_ticket,
+    get_guild_settings,
+    get_next_ticket_number,
+    get_ticket,
+    get_tickets_due_for_deletion,
+    mark_ticket_closed,
+    mark_ticket_deleted,
+    set_ticket_claim,
+)
 
 OPEN_TICKET_CUSTOM_ID = "open_ticket_button"
 CLAIM_TICKET_CUSTOM_ID = "claim_ticket_button"
@@ -44,6 +54,40 @@ class CloseReasonModal(discord.ui.Modal, title="إغلاق التذكرة"):
 
     async def on_submit(self, interaction: discord.Interaction):
         reason_text = self.reason.value.strip() if self.reason.value else None
+        thread = interaction.channel
+
+        # نولّد نسخة كاملة من المحادثة ونبعتها لقناة اللوج (لو محددة) قبل ما نجدول الحذف
+        settings = await get_guild_settings(interaction.guild_id)
+        log_channel_id = settings.get("ticket_log_channel_id")
+        log_channel = interaction.guild.get_channel(log_channel_id) if log_channel_id else None
+        transcript_saved = False
+
+        if log_channel:
+            lines = []
+            async for msg in thread.history(limit=None, oldest_first=True):
+                stamp = msg.created_at.strftime("%Y-%m-%d %H:%M")
+                lines.append(f"[{stamp}] {msg.author}: {msg.content}")
+            transcript_text = "\n".join(lines) or "لا توجد رسائل."
+            file = discord.File(
+                io.BytesIO(transcript_text.encode("utf-8")), filename=f"{thread.name}.txt"
+            )
+            log_embed = discord.Embed(
+                title=f"📁 نسخة تذكرة مغلقة - {thread.name}",
+                color=discord.Color.dark_grey(),
+                timestamp=datetime.datetime.utcnow(),
+            )
+            log_embed.add_field(name="بواسطة", value=interaction.user.mention, inline=True)
+            if reason_text:
+                log_embed.add_field(name="السبب", value=reason_text, inline=False)
+            await log_channel.send(embed=log_embed, file=file)
+            transcript_saved = True
+
+        note = (
+            "📁 تم حفظ نسخة كاملة من المحادثة بقناة اللوج."
+            if transcript_saved
+            else "⚠️ ما في قناة لوج محددة، فما راح تنحفظ نسخة من المحادثة."
+        )
+        note += "\n🗑️ هاي القناة رح تنحذف تلقائيًا خلال 24 ساعة."
 
         embed = discord.Embed(
             title="🔒 تم إغلاق التذكرة",
@@ -53,11 +97,16 @@ class CloseReasonModal(discord.ui.Modal, title="إغلاق التذكرة"):
         embed.add_field(name="بواسطة", value=interaction.user.mention, inline=True)
         if reason_text:
             embed.add_field(name="السبب", value=reason_text, inline=False)
+        embed.add_field(name="ملاحظة", value=note, inline=False)
 
         await interaction.response.send_message(embed=embed)
 
-        # نحاول نبعت نفس معلومات الإغلاق لصاحب التذكرة عالخاص
-        ticket = await get_ticket(interaction.channel.id)
+        # نجدول الحذف التلقائي بعد 24 ساعة (مهمة الخلفية بتتأكد كل شوي مين وصل وقته)
+        delete_at = datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+        await mark_ticket_closed(thread.id, delete_at)
+
+        # نبعت نفس معلومات الإغلاق لصاحب التذكرة عالخاص
+        ticket = await get_ticket(thread.id)
         if ticket:
             opener = interaction.guild.get_member(ticket["opener_id"])
             if opener:
@@ -70,12 +119,13 @@ class CloseReasonModal(discord.ui.Modal, title="إغلاق التذكرة"):
                 dm_embed.add_field(name="بواسطة", value=str(interaction.user), inline=True)
                 if reason_text:
                     dm_embed.add_field(name="السبب", value=reason_text, inline=False)
+                dm_embed.add_field(name="ملاحظة", value=note, inline=False)
                 try:
                     await opener.send(embed=dm_embed)
                 except discord.Forbidden:
                     pass  # مسكر الـ DMs - ما في داعي نوقف عملية الإغلاق بسبب هيك
 
-        await interaction.channel.edit(archived=True, locked=True)
+        await thread.edit(archived=True, locked=True)
 
 
 class TicketActionsView(discord.ui.View):
@@ -227,6 +277,26 @@ class TicketPanelView(discord.ui.View):
 class Tickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.cleanup_expired_tickets.start()
+
+    def cog_unload(self):
+        self.cleanup_expired_tickets.cancel()
+
+    @tasks.loop(minutes=30)
+    async def cleanup_expired_tickets(self):
+        due = await get_tickets_due_for_deletion(datetime.datetime.utcnow())
+        for ticket in due:
+            channel = self.bot.get_channel(ticket["thread_id"])
+            if channel:
+                try:
+                    await channel.delete()
+                except discord.HTTPException:
+                    pass
+            await mark_ticket_deleted(ticket["thread_id"])
+
+    @cleanup_expired_tickets.before_loop
+    async def before_cleanup(self):
+        await self.bot.wait_until_ready()
 
     @app_commands.command(name="ticket-panel", description="ينشر لوحة فتح التذاكر بهاي القناة")
     @app_commands.checks.has_permissions(manage_guild=True)
