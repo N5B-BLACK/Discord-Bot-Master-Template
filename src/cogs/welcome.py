@@ -1,11 +1,13 @@
 """
-نظام الترحيب: رسالة ترحيب مخصصة + رول تلقائي للأعضاء الجدد.
+حدث الترحيب بالأعضاء الجدد - يرسل رسالة ترحيب ويعطي رول تلقائي حسب إعدادات كل سيرفر
+(مضبوطة عن طريق أمر /setup).
 """
 
 import discord
 from discord.ext import commands
 
 import config
+from utils.db import get_guild_settings
 
 
 class Welcome(commands.Cog):
@@ -14,27 +16,20 @@ class Welcome(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        # 1. إرسال رسالة الترحيب
-        channel = None
-        if config.WELCOME_CHANNEL_ID:
-            channel = member.guild.get_channel(config.WELCOME_CHANNEL_ID)
+        settings = await get_guild_settings(member.guild.id)
 
-        if channel:
-            message = config.WELCOME_MESSAGE.format(
-                member=member.mention, guild=member.guild.name
-            )
-            embed = discord.Embed(
-                description=message,
-                color=config.EMBED_COLOR,
-            )
-            embed.set_thumbnail(url=member.display_avatar.url)
-            await channel.send(embed=embed)
+        welcome_channel_id = settings.get("welcome_channel_id")
+        if welcome_channel_id:
+            channel = member.guild.get_channel(welcome_channel_id)
+            if channel:
+                message = config.WELCOME_MESSAGE.format(member=member.mention, guild=member.guild.name)
+                await channel.send(message)
 
-        # 2. إعطاء الرول التلقائي (إن وُجد)
-        if config.AUTO_ROLE_ID:
-            role = member.guild.get_role(config.AUTO_ROLE_ID)
+        auto_role_id = settings.get("auto_role_id")
+        if auto_role_id:
+            role = member.guild.get_role(auto_role_id)
             if role:
-                await member.add_roles(role, reason="رول تلقائي للأعضاء الجدد")
+                await member.add_roles(role)
 
 
 async def setup(bot: commands.Bot):
