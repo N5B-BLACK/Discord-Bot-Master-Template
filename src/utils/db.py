@@ -10,6 +10,7 @@ import config
 _client = motor.motor_asyncio.AsyncIOMotorClient(config.MONGODB_URI)
 _db = _client["discord_bot"]
 _guild_settings = _db["guild_settings"]
+_tickets = _db["tickets"]
 
 
 async def check_connection() -> bool:
@@ -44,3 +45,22 @@ async def update_guild_setting(guild_id: int, key: str, value) -> None:
         {"$set": {key: value, "guild_id": guild_id}},
         upsert=True,
     )
+
+
+async def create_ticket(guild_id: int, thread_id: int, opener_id: int) -> None:
+    """يسجل تذكرة جديدة - مين فتحها ولسا ما استلمها حدا."""
+    await _tickets.update_one(
+        {"thread_id": thread_id},
+        {"$set": {"guild_id": guild_id, "opener_id": opener_id, "claimed_by": None}},
+        upsert=True,
+    )
+
+
+async def get_ticket(thread_id: int):
+    """يرجع بيانات التذكرة (guild_id, opener_id, claimed_by)، أو None لو ما لقاها."""
+    return await _tickets.find_one({"thread_id": thread_id})
+
+
+async def set_ticket_claim(thread_id: int, staff_id: int) -> None:
+    """يسجل مين استلم التذكرة."""
+    await _tickets.update_one({"thread_id": thread_id}, {"$set": {"claimed_by": staff_id}})
