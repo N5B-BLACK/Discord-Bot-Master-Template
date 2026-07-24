@@ -24,6 +24,7 @@ DEFAULT_SETTINGS = {
     "welcome_channel_id": None,
     "auto_role_id": None,
     "ai_chat_channel_id": None,
+    "ticket_support_role_id": None,
 }
 
 
