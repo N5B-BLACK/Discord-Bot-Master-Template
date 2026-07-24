@@ -13,7 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils.db import get_guild_settings, update_guild_setting
+from utils.db import get_guild_settings
 
 OPEN_TICKET_CUSTOM_ID = "open_ticket_button"
 CLOSE_TICKET_CUSTOM_ID = "close_ticket_button"
@@ -109,25 +109,6 @@ class TicketPanelView(discord.ui.View):
         await interaction.followup.send(f"✅ تم فتح تذكرتك: {thread.mention}", ephemeral=True)
 
 
-class TicketSupportRoleView(discord.ui.View):
-    """View بسيط لتحديد رول الدعم بس - منفصل عن /setup الرئيسي."""
-
-    def __init__(self):
-        super().__init__(timeout=300)
-
-    @discord.ui.select(
-        cls=discord.ui.RoleSelect,
-        placeholder="اختر رول الدعم المسؤول عن التذاكر",
-        row=0,
-    )
-    async def support_role_select(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
-        role = select.values[0]
-        await update_guild_setting(interaction.guild_id, "ticket_support_role_id", role.id)
-        await interaction.response.send_message(
-            f"✅ تم تحديد رول الدعم: {role.mention}", ephemeral=True
-        )
-
-
 class Tickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -141,13 +122,6 @@ class Tickets(commands.Cog):
             color=discord.Color.blurple(),
         )
         await interaction.response.send_message(embed=embed, view=TicketPanelView())
-
-    @app_commands.command(name="setup-tickets", description="حدد رول الدعم المسؤول عن التذاكر")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def setup_tickets(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-            "اختر رول الدعم:", view=TicketSupportRoleView(), ephemeral=True
-        )
 
 
 async def setup(bot: commands.Bot):
