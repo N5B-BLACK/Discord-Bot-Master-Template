@@ -11,11 +11,13 @@
   التذكرة الحقيقي - لهيك بنسجل صاحب التذكرة يدويًا بقاعدة البيانات (utils/db.py).
 """
 
+import datetime
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils.db import create_ticket, get_guild_settings, get_ticket, set_ticket_claim
+from utils.db import create_ticket, get_guild_settings, get_next_ticket_number, get_ticket, set_ticket_claim
 
 OPEN_TICKET_CUSTOM_ID = "open_ticket_button"
 CLAIM_TICKET_CUSTOM_ID = "claim_ticket_button"
@@ -157,15 +159,21 @@ class TicketPanelView(discord.ui.View):
 
         # نسجل صاحب التذكرة الحقيقي بقاعدة البيانات (thread.owner_id بيرجع البوت مش العضو)
         await create_ticket(interaction.guild_id, thread.id, interaction.user.id)
+        ticket_number = await get_next_ticket_number(interaction.guild_id)
 
         embed = discord.Embed(
             title="🎫 تذكرة جديدة",
-            description=(
-                f"أهلاً {interaction.user.mention}! فريق {support_role.mention} رح يتواصل معك هون قريبًا.\n\n"
-                "اشرح مشكلتك أو طلبك بالتفصيل بأول رسالة."
-            ),
+            description="اشرح مشكلتك أو طلبك بالتفصيل، وفريق الدعم رح يتواصل معك قريبًا.",
             color=discord.Color.green(),
+            timestamp=datetime.datetime.utcnow(),
         )
+        if interaction.guild.icon:
+            embed.set_thumbnail(url=interaction.guild.icon.url)
+        embed.add_field(name="👤 صاحب التذكرة", value=interaction.user.mention, inline=True)
+        embed.add_field(name="🛡️ فريق الدعم", value=support_role.mention, inline=True)
+        embed.add_field(name="🔢 رقم التذكرة", value=f"#{ticket_number}", inline=True)
+        embed.set_footer(text="تاريخ الفتح")
+
         await thread.send(embed=embed, view=TicketActionsView())
 
         await interaction.followup.send(f"✅ تم فتح تذكرتك: {thread.mention}", ephemeral=True)
