@@ -167,8 +167,7 @@ class TicketPanelView(discord.ui.View):
             color=discord.Color.green(),
             timestamp=datetime.datetime.utcnow(),
         )
-        if interaction.guild.icon:
-            embed.set_thumbnail(url=interaction.guild.icon.url)
+        embed.set_thumbnail(url=interaction.user.display_avatar.url)
         embed.add_field(name="👤 صاحب التذكرة", value=interaction.user.mention, inline=True)
         embed.add_field(name="🛡️ فريق الدعم", value=support_role.mention, inline=True)
         embed.add_field(name="🔢 رقم التذكرة", value=f"#{ticket_number}", inline=True)
