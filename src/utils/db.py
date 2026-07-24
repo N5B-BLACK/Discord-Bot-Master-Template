@@ -11,6 +11,12 @@ _client = motor.motor_asyncio.AsyncIOMotorClient(config.MONGODB_URI)
 _db = _client["discord_bot"]
 _guild_settings = _db["guild_settings"]
 
+
+async def check_connection() -> bool:
+    """يعمل ping بسيط لقاعدة البيانات - يرجع True لو الاتصال شغال، ويرفع استثناء لو في مشكلة."""
+    await _client.admin.command("ping")
+    return True
+
 # القيم الافتراضية - لو ما في إعداد محفوظ لسيرفر معين، بترجع هاي القيم (يعني بدون أي تقييد)
 DEFAULT_SETTINGS = {
     "mod_role_id": None,
