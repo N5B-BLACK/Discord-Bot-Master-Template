@@ -31,6 +31,33 @@ async def _is_support(interaction: discord.Interaction) -> bool:
     return bool(support_role_id) and any(r.id == support_role_id for r in interaction.user.roles)
 
 
+class CloseReasonModal(discord.ui.Modal, title="إغلاق التذكرة"):
+    """نافذة صغيرة تظهر وقت الإغلاق - خانة السبب اختيارية، ممكن تخليها فاضية."""
+
+    reason = discord.ui.TextInput(
+        label="سبب الإغلاق (اختياري)",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=500,
+        placeholder="اتركها فاضية لو ما بدك تحدد سبب",
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        reason_text = self.reason.value.strip() if self.reason.value else None
+
+        embed = discord.Embed(
+            title="🔒 تم إغلاق التذكرة",
+            color=discord.Color.red(),
+            timestamp=datetime.datetime.utcnow(),
+        )
+        embed.add_field(name="بواسطة", value=interaction.user.mention, inline=True)
+        if reason_text:
+            embed.add_field(name="السبب", value=reason_text, inline=False)
+
+        await interaction.response.send_message(embed=embed)
+        await interaction.channel.edit(archived=True, locked=True)
+
+
 class TicketActionsView(discord.ui.View):
     """أزرار داخل كل تذكرة - View دائم (بدون انتهاء صلاحية)."""
 
@@ -105,8 +132,7 @@ class TicketActionsView(discord.ui.View):
             )
             return
 
-        await interaction.response.send_message("🔒 جاري إغلاق التذكرة...")
-        await interaction.channel.edit(archived=True, locked=True)
+        await interaction.response.send_modal(CloseReasonModal())
 
 
 class TicketPanelView(discord.ui.View):
