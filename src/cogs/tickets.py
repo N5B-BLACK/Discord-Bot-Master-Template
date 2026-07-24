@@ -2,28 +2,91 @@
 نظام التذاكر (Tickets):
 - /ticket-panel: ينشر لوحة فيها زر ثابت بالقناة الحالية.
 - لما عضو يضغط الزر، ينفتحله Private Thread يشوفه هو + رول الدعم بس.
-- /setup-tickets: يحدد رول الدعم المسؤول عن التذاكر (منفصل عن /setup الرئيسي
-  لأن اللوحة الأساسية أصلاً معبّية 5 صفوف - الحد الأقصى المسموح بديسكورد).
+- داخل كل تذكرة 3 أزرار لفريق الدعم: استلام، استحضار (تذكير بالخاص)، إغلاق.
+- رول الدعم يتحدد عن طريق /setup (صفحة 2).
 
-ملاحظة مهمة: Private Threads بتحتاج السيرفر يكون Boost Level 2 فأعلى.
-لو السيرفر أقل من هيك، محاولة فتح تذكرة بترجع خطأ واضح للمستخدم بدل ما "تطيح" بصمت.
+ملاحظات مهمة:
+- Private Threads بتحتاج السيرفر يكون Boost Level 2 فأعلى.
+- Thread.owner_id بيرجع البوت نفسه (لأنه هو يلي أنشأ الـ Thread تقنيًا)، مش صاحب
+  التذكرة الحقيقي - لهيك بنسجل صاحب التذكرة يدويًا بقاعدة البيانات (utils/db.py).
 """
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils.db import get_guild_settings
+from utils.db import create_ticket, get_guild_settings, get_ticket, set_ticket_claim
 
 OPEN_TICKET_CUSTOM_ID = "open_ticket_button"
+CLAIM_TICKET_CUSTOM_ID = "claim_ticket_button"
+SUMMON_TICKET_CUSTOM_ID = "summon_ticket_button"
 CLOSE_TICKET_CUSTOM_ID = "close_ticket_button"
 
 
-class CloseTicketView(discord.ui.View):
-    """زر إغلاق داخل كل تذكرة - View دائم (بدون انتهاء صلاحية)."""
+async def _is_support(interaction: discord.Interaction) -> bool:
+    settings = await get_guild_settings(interaction.guild_id)
+    support_role_id = settings.get("ticket_support_role_id")
+    return bool(support_role_id) and any(r.id == support_role_id for r in interaction.user.roles)
+
+
+class TicketActionsView(discord.ui.View):
+    """أزرار داخل كل تذكرة - View دائم (بدون انتهاء صلاحية)."""
 
     def __init__(self):
         super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="🙋 استلام",
+        style=discord.ButtonStyle.success,
+        custom_id=CLAIM_TICKET_CUSTOM_ID,
+    )
+    async def claim_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await _is_support(interaction):
+            await interaction.response.send_message("🚫 بس فريق الدعم يقدر يستلم التذاكر.", ephemeral=True)
+            return
+
+        ticket = await get_ticket(interaction.channel.id)
+        if ticket and ticket.get("claimed_by"):
+            claimer = interaction.guild.get_member(ticket["claimed_by"])
+            await interaction.response.send_message(
+                f"⚠️ التذكرة مستلمة أصلاً من {claimer.mention if claimer else 'عضو آخر'}.",
+                ephemeral=True,
+            )
+            return
+
+        await set_ticket_claim(interaction.channel.id, interaction.user.id)
+        await interaction.response.send_message(f"✅ {interaction.user.mention} استلم هاي التذكرة.")
+
+    @discord.ui.button(
+        label="📩 استحضار",
+        style=discord.ButtonStyle.primary,
+        custom_id=SUMMON_TICKET_CUSTOM_ID,
+    )
+    async def summon_member(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await _is_support(interaction):
+            await interaction.response.send_message("🚫 بس فريق الدعم يقدر يستخدم هاد الزر.", ephemeral=True)
+            return
+
+        ticket = await get_ticket(interaction.channel.id)
+        if not ticket:
+            await interaction.response.send_message("⚠️ ما لقيت بيانات هاي التذكرة.", ephemeral=True)
+            return
+
+        opener = interaction.guild.get_member(ticket["opener_id"])
+        if opener is None:
+            await interaction.response.send_message("⚠️ ما قدرت ألاقي صاحب التذكرة بالسيرفر.", ephemeral=True)
+            return
+
+        try:
+            await opener.send(
+                f"👋 تذكير من فريق الدعم بسيرفر **{interaction.guild.name}**: "
+                f"في رد بانتظارك بتذكرتك {interaction.channel.jump_url}"
+            )
+            await interaction.response.send_message(f"📩 تم إرسال تذكير لـ {opener.mention} على الخاص.")
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                f"⚠️ ما قدرت أبعتله رسالة خاصة (الخاص مسكر عنده). جرب تمنشنه هون مباشرة: {opener.mention}"
+            )
 
     @discord.ui.button(
         label="🔒 إغلاق التذكرة",
@@ -31,21 +94,17 @@ class CloseTicketView(discord.ui.View):
         custom_id=CLOSE_TICKET_CUSTOM_ID,
     )
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        settings = await get_guild_settings(interaction.guild_id)
-        support_role_id = settings.get("ticket_support_role_id")
-        is_support = support_role_id and any(r.id == support_role_id for r in interaction.user.roles)
+        ticket = await get_ticket(interaction.channel.id)
+        is_owner = ticket and ticket.get("opener_id") == interaction.user.id
 
-        thread = interaction.channel
-        is_owner = getattr(thread, "owner_id", None) == interaction.user.id
-
-        if not (is_support or is_owner):
+        if not (await _is_support(interaction) or is_owner):
             await interaction.response.send_message(
                 "🚫 بس فريق الدعم أو صاحب التذكرة يقدر يسكرها.", ephemeral=True
             )
             return
 
         await interaction.response.send_message("🔒 جاري إغلاق التذكرة...")
-        await thread.edit(archived=True, locked=True)
+        await interaction.channel.edit(archived=True, locked=True)
 
 
 class TicketPanelView(discord.ui.View):
@@ -66,7 +125,7 @@ class TicketPanelView(discord.ui.View):
 
         if support_role is None:
             await interaction.response.send_message(
-                "⚠️ ما في رول دعم محدد بعد. لازم أدمن السيرفر يضبطه أول عن طريق `/setup-tickets`.",
+                "⚠️ ما في رول دعم محدد بعد. لازم أدمن السيرفر يضبطه أول عن طريق `/setup`.",
                 ephemeral=True,
             )
             return
@@ -96,6 +155,9 @@ class TicketPanelView(discord.ui.View):
             except discord.HTTPException:
                 pass
 
+        # نسجل صاحب التذكرة الحقيقي بقاعدة البيانات (thread.owner_id بيرجع البوت مش العضو)
+        await create_ticket(interaction.guild_id, thread.id, interaction.user.id)
+
         embed = discord.Embed(
             title="🎫 تذكرة جديدة",
             description=(
@@ -104,7 +166,7 @@ class TicketPanelView(discord.ui.View):
             ),
             color=discord.Color.green(),
         )
-        await thread.send(embed=embed, view=CloseTicketView())
+        await thread.send(embed=embed, view=TicketActionsView())
 
         await interaction.followup.send(f"✅ تم فتح تذكرتك: {thread.mention}", ephemeral=True)
 
@@ -127,5 +189,5 @@ class Tickets(commands.Cog):
 async def setup(bot: commands.Bot):
     # تسجيل الـ Views الدائمة عشان الأزرار تضل شغالة حتى بعد إعادة تشغيل البوت
     bot.add_view(TicketPanelView())
-    bot.add_view(CloseTicketView())
+    bot.add_view(TicketActionsView())
     await bot.add_cog(Tickets(bot))
