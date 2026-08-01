@@ -48,9 +48,10 @@ def _same_channel_or_none(interaction: discord.Interaction, player) -> bool:
 
 async def _now_playing_embed(guild_id: int, player) -> discord.Embed:
     track = player.current
+    title = "🎶 Now Playing" + (" (via SoundCloud)" if track.source == "soundcloud" else "")
     embed = await build_embed(
         guild_id,
-        title="🎶 Now Playing",
+        title=title,
         description=f"[{track.title}]({track.webpage_url})" if track.webpage_url else track.title,
         use_brand_thumbnail=False,
     )
@@ -271,7 +272,7 @@ class SearchPickView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(content=f"✅ Selected **{choice['title']}** - queueing...", view=self)
-        await self.on_pick(interaction, choice["url"])
+        await self.on_pick(interaction, choice["url"], choice["title"])
 
     async def on_timeout(self):
         for item in self.children:
@@ -383,9 +384,9 @@ class Music(commands.Cog):
                 return
 
             # plain search query - show a pick-list of the top results
-            async def on_pick(pick_interaction: discord.Interaction, chosen_url: str):
+            async def on_pick(pick_interaction: discord.Interaction, chosen_url: str, chosen_title: str):
                 try:
-                    track = await resolve_track(chosen_url, interaction.user.id)
+                    track = await resolve_track(chosen_url, interaction.user.id, fallback_query=chosen_title)
                 except ExtractionError as e:
                     await interaction.followup.send(f"⚠️ {e}")
                     return

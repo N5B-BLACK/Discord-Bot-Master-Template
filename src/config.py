@@ -50,3 +50,9 @@ REDIRECT_URI = os.getenv("REDIRECT_URI")
 # Derived from REDIRECT_URI (e.g. https://your-app.onrender.com/callback -> https://your-app.onrender.com)
 # used to build "open in dashboard" links from within Discord (e.g. /embed builder).
 DASHBOARD_BASE_URL = REDIRECT_URI.rsplit("/callback", 1)[0] if REDIRECT_URI else None
+
+# Optional: base64-encoded Netscape-format cookies.txt exported from a real, logged-in
+# YouTube session - improves music playback reliability on cloud hosts (see
+# utils/music_source.py's module docstring). Entirely optional; everything works
+# without it, just less reliably when YouTube's bot-check triggers.
+YTDLP_COOKIES_B64 = os.getenv("YTDLP_COOKIES_B64")
