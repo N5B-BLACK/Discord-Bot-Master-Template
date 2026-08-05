@@ -33,7 +33,15 @@ class Moderation(commands.Cog):
     @has_configured_role("mod_role_id")
     @app_commands.checks.has_permissions(kick_members=True)
     async def kick(self, interaction: discord.Interaction, member: discord.Member, reason: str = None):
-        await member.kick(reason=reason)
+        try:
+            await member.kick(reason=reason)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                f"🚫 I can't kick {member.mention} - they may have a higher role than me, "
+                "or I'm missing the Kick Members permission.",
+                ephemeral=True,
+            )
+            return
         await interaction.response.send_message(f"👢 Kicked {member.mention}. Reason: {reason or 'Not specified'}")
         # Note: this is automatically logged to the "kick log" channel (audit_logs.py)
 
@@ -42,17 +50,39 @@ class Moderation(commands.Cog):
     @has_configured_role("mod_role_id")
     @app_commands.checks.has_permissions(ban_members=True)
     async def ban(self, interaction: discord.Interaction, member: discord.Member, reason: str = None):
-        await member.ban(reason=reason)
+        try:
+            await member.ban(reason=reason)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                f"🚫 I can't ban {member.mention} - they may have a higher role than me, "
+                "or I'm missing the Ban Members permission.",
+                ephemeral=True,
+            )
+            return
         await interaction.response.send_message(f"🔨 Banned {member.mention}. Reason: {reason or 'Not specified'}")
         # Note: this is automatically logged to the "ban/unban log" channel (audit_logs.py)
 
     @app_commands.command(name="mute", description="Temporarily timeout a member")
-    @app_commands.describe(member="The member to mute", minutes="Duration in minutes", reason="Reason")
+    @app_commands.describe(member="The member to mute", minutes="Duration in minutes (max 40320 = 28 days)", reason="Reason")
     @has_configured_role("mod_role_id")
     @app_commands.checks.has_permissions(moderate_members=True)
-    async def mute(self, interaction: discord.Interaction, member: discord.Member, minutes: int = 10, reason: str = None):
+    async def mute(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        minutes: app_commands.Range[int, 1, 40320] = 10,  # Discord's own hard cap on timeouts is 28 days
+        reason: str = None,
+    ):
         duration = datetime.timedelta(minutes=minutes)
-        await member.timeout(duration, reason=reason)
+        try:
+            await member.timeout(duration, reason=reason)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                f"🚫 I can't time out {member.mention} - they may have a higher role than me, "
+                "or I'm missing the Moderate Members permission.",
+                ephemeral=True,
+            )
+            return
         await interaction.response.send_message(f"🔇 Timed out {member.mention} for {minutes} minutes.")
         # Note: this is automatically logged to the "timeout log" channel (audit_logs.py)
 

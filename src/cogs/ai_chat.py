@@ -1,6 +1,12 @@
 """
 AI integration: /ask sends a question to OpenRouter (OpenAI-compatible) and returns the answer.
 The allowed channel is configured per-server via /setup (not a static .env value).
+
+Uses AsyncOpenAI specifically (not OpenAI) - the sync client's .create() call blocks
+the calling thread for the full round-trip to OpenRouter, and since this runs inside
+an async command handler, a blocking call here would freeze the bot's ENTIRE event
+loop (every guild, every command, voice included) for as long as the AI takes to
+respond, not just this one /ask call.
 """
 
 import logging
@@ -8,7 +14,7 @@ import logging
 import discord
 from discord import app_commands
 from discord.ext import commands
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 import config
 from utils.checks import in_configured_channel
@@ -16,7 +22,7 @@ from utils.checks import in_configured_channel
 logger = logging.getLogger("bot")
 
 client = (
-    OpenAI(
+    AsyncOpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=config.OPENROUTER_API_KEY,
     )
@@ -46,7 +52,7 @@ class AIChat(commands.Cog):
 
         await interaction.response.defer()
         try:
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model=config.AI_MODEL,
                 max_tokens=500,
                 messages=[

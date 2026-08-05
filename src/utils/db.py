@@ -57,8 +57,12 @@ DEFAULT_SETTINGS = {
 
 async def get_guild_settings(guild_id: int) -> dict:
     """Returns the saved settings for a server, or defaults if the admin hasn't configured anything yet."""
+    import copy
+
     doc = await _guild_settings.find_one({"guild_id": guild_id})
-    settings = DEFAULT_SETTINGS.copy()
+    # deepcopy, not copy() - DEFAULT_SETTINGS contains a mutable dict (log_colors: {}); a shallow
+    # copy would let every guild's "default" settings share and potentially corrupt the same dict.
+    settings = copy.deepcopy(DEFAULT_SETTINGS)
     if doc:
         settings.update({k: v for k, v in doc.items() if k in DEFAULT_SETTINGS})
     return settings

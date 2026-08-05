@@ -76,10 +76,6 @@ YTDLP_OPTS_SOUNDCLOUD = {
     "extract_flat": False,
 }
 
-FFMPEG_BEFORE_OPTS = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
-FFMPEG_OPTS = "-vn"
-
-
 @dataclasses.dataclass
 class Track:
     title: str
@@ -90,6 +86,9 @@ class Track:
     uploader: str | None
     requested_by: int  # user ID - stored as an ID, not a mention, so it survives serialization if ever needed
     source: str = "youtube"  # "youtube" or "soundcloud" - lets the UI note when a fallback was used
+    http_headers: dict | None = None  # some CDNs (SoundCloud especially) need the same headers yt-dlp
+    # used to authorize the URL, or they serve an empty/broken response - attached to the
+    # urllib request in utils/http_audio_source.py, not passed to FFmpeg (which no longer touches the network at all)
 
 
 class ExtractionError(Exception):
@@ -177,13 +176,16 @@ async def search_candidates(query: str, limit: int = 5) -> list[dict]:
 
 def _track_from_info(info: dict, query: str, requested_by: int, source: str) -> Track:
     stream_url = info.get("url")
+    http_headers = info.get("http_headers")
     if not stream_url:
         # some extractors return a "formats" list instead of a top-level url
         formats = info.get("formats") or []
         audio_formats = [f for f in formats if f.get("acodec") != "none" and f.get("url")]
         if not audio_formats:
             raise ExtractionError(f"Found **{info.get('title', query)}** but couldn't get a playable audio stream.")
-        stream_url = audio_formats[-1]["url"]
+        chosen = audio_formats[-1]
+        stream_url = chosen["url"]
+        http_headers = chosen.get("http_headers") or http_headers
 
     return Track(
         title=info.get("title") or query,
@@ -194,6 +196,7 @@ def _track_from_info(info: dict, query: str, requested_by: int, source: str) -> 
         uploader=info.get("uploader"),
         requested_by=requested_by,
         source=source,
+        http_headers=http_headers or None,
     )
 
 

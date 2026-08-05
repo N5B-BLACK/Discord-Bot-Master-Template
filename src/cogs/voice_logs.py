@@ -17,22 +17,13 @@ import datetime
 import discord
 from discord.ext import commands
 
-from utils.db import get_guild_settings
 from utils.embed_helper import build_embed
+from utils.log_helper import send_guild_log
 
 
 class VoiceLogs(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-
-    async def _send_log(self, guild: discord.Guild, setting_key: str, embed: discord.Embed):
-        settings = await get_guild_settings(guild.id)
-        channel_id = settings.get(setting_key)
-        if not channel_id:
-            return
-        channel = guild.get_channel(channel_id)
-        if channel:
-            await channel.send(embed=embed)
 
     async def _check_forced_disconnect(self, member: discord.Member) -> discord.Member | None:
         """Checks the Audit Log for a forced disconnect of this member in the last few seconds -
@@ -64,7 +55,7 @@ class VoiceLogs(commands.Cog):
             embed.timestamp = datetime.datetime.utcnow()
             embed.add_field(name="Member", value=member.mention, inline=True)
             embed.add_field(name="Channel", value=after.channel.mention, inline=True)
-            await self._send_log(member.guild, "voice_join_leave_log_channel_id", embed)
+            await send_guild_log(member.guild, "voice_join_leave_log_channel_id", embed)
 
         # 2) left entirely (or was disconnected by an admin)
         elif before.channel is not None and after.channel is None:
@@ -77,7 +68,7 @@ class VoiceLogs(commands.Cog):
                 embed.add_field(name="Member", value=member.mention, inline=True)
                 embed.add_field(name="By", value=forced_by.mention, inline=True)
                 embed.add_field(name="Channel", value=before.channel.mention, inline=True)
-                await self._send_log(member.guild, "voice_disconnect_log_channel_id", embed)
+                await send_guild_log(member.guild, "voice_disconnect_log_channel_id", embed)
             else:
                 embed = await build_embed(
                     guild_id, title="🎙️ Left a voice channel", color=discord.Color.orange().value
@@ -85,7 +76,7 @@ class VoiceLogs(commands.Cog):
                 embed.timestamp = datetime.datetime.utcnow()
                 embed.add_field(name="Member", value=member.mention, inline=True)
                 embed.add_field(name="Channel", value=before.channel.mention, inline=True)
-                await self._send_log(member.guild, "voice_join_leave_log_channel_id", embed)
+                await send_guild_log(member.guild, "voice_join_leave_log_channel_id", embed)
 
         # 3) switched between two channels
         elif (
@@ -100,7 +91,7 @@ class VoiceLogs(commands.Cog):
             embed.add_field(name="Member", value=member.mention, inline=True)
             embed.add_field(name="From", value=before.channel.mention, inline=True)
             embed.add_field(name="To", value=after.channel.mention, inline=True)
-            await self._send_log(member.guild, "voice_switch_log_channel_id", embed)
+            await send_guild_log(member.guild, "voice_switch_log_channel_id", embed)
 
         # 4) server mute/unmute - not self-mute
         if before.mute != after.mute:
@@ -110,7 +101,7 @@ class VoiceLogs(commands.Cog):
             embed.add_field(name="Member", value=member.mention, inline=True)
             if after.channel:
                 embed.add_field(name="Channel", value=after.channel.mention, inline=True)
-            await self._send_log(member.guild, "voice_mute_log_channel_id", embed)
+            await send_guild_log(member.guild, "voice_mute_log_channel_id", embed)
 
         # 5) server deafen/undeafen - not self-deafen
         if before.deaf != after.deaf:
@@ -120,7 +111,7 @@ class VoiceLogs(commands.Cog):
             embed.add_field(name="Member", value=member.mention, inline=True)
             if after.channel:
                 embed.add_field(name="Channel", value=after.channel.mention, inline=True)
-            await self._send_log(member.guild, "voice_deafen_log_channel_id", embed)
+            await send_guild_log(member.guild, "voice_deafen_log_channel_id", embed)
 
 
 async def setup(bot: commands.Bot):

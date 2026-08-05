@@ -6,6 +6,8 @@ Bots and humans get different auto-roles (bot_auto_role_id vs auto_role_id) sinc
 servers often want a distinct "Bots" role separate from the regular member role.
 """
 
+import logging
+
 import discord
 from discord.ext import commands
 
@@ -13,6 +15,8 @@ import config
 from utils.db import get_guild_settings
 from utils.embed_helper import build_embed
 from utils.message_templates import resolve_embed
+
+logger = logging.getLogger("bot")
 
 
 class Welcome(commands.Cog):
@@ -59,7 +63,13 @@ class Welcome(commands.Cog):
         if role_id:
             role = member.guild.get_role(role_id)
             if role:
-                await member.add_roles(role)
+                try:
+                    await member.add_roles(role)
+                except discord.Forbidden:
+                    logger.warning(
+                        f"Couldn't assign auto-role '{role.name}' to {member} in {member.guild.name} - "
+                        "the bot's role is likely below it in the role hierarchy."
+                    )
 
 
 async def setup(bot: commands.Bot):

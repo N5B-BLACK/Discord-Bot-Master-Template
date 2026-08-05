@@ -48,7 +48,11 @@ MANAGE_GUILD = 0x20
 COOKIE_NAME = "session_data"
 MAX_AGE = 60 * 60 * 24 * 7  # 7 days
 
-# Mirrors /setup's pages exactly, grouped for the dashboard's Settings page.
+# Same 19 settings as /setup (cogs/setup.py) - kept in sync deliberately, verify both
+# match if a setting is ever added/removed. Grouped differently than /setup's pages
+# here, though: /setup is forced into 4-items-per-page by Discord's 5-action-row
+# limit, but the dashboard has no such constraint, so these groups are organized by
+# broader topic instead of Discord's UI mechanics.
 # 4th tuple item: whether this field gets an inline color picker (only true log-channel
 # types - not roles, and not welcome/ai-chat which already have full control elsewhere:
 # welcome via Message Templates, ai-chat isn't an embed at all).

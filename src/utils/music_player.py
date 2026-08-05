@@ -1,15 +1,19 @@
 """
 Per-guild music playback engine.
 
-IMPORTANT DEPLOYMENT NOTE (flagged before this feature was built, confirmed still
-true): this streams audio by having yt-dlp resolve a direct googlevideo.com URL and
-handing it to FFmpeg. Cloud hosts with shared/rotating IPs - Render's free tier
-included - are commonly rate-limited or blocked by YouTube for this kind of traffic.
-This is an infrastructure limitation, not a bug in this code. If /play starts failing
-consistently in production but works locally, that's almost certainly what's
-happening - the fix is a dedicated IP, a proxy, or migrating to a Lavalink node, not a
-code change here. utils/music_source.py is kept isolated specifically so that swap is
-possible later without touching this file or the commands in cogs/music.py.
+STREAMING ARCHITECTURE NOTE: audio is fetched by Python (urllib, via
+utils/http_audio_source.py) and piped into FFmpeg's stdin, rather than letting FFmpeg
+open the stream URL itself. This is deliberate, not the default/simpler approach:
+this project's hosting (Render, using imageio-ffmpeg's bundled static ffmpeg binary)
+segfaults when FFmpeg tries to fetch ANY network URL directly - confirmed by direct
+reproduction, unrelated to headers or HTTPS specifically. Piping sidesteps FFmpeg's
+network code entirely; it only ever decodes a local pipe. See
+utils/http_audio_source.py's module docstring for the full story.
+
+A separate, unrelated risk remains even with this fix: YouTube can still refuse to
+serve a stream URL at all ("Sign in to confirm you're not a bot") from cloud/datacenter
+IPs. utils/music_source.py handles that with an automatic SoundCloud fallback - this
+file just plays whatever valid, already-resolved URL it's given.
 
 Architecture: one GuildPlayer per guild that's ever played music, kept in a registry
 dict (`players`) keyed by guild ID. Every guild's playback is fully independent - the
@@ -24,6 +28,7 @@ real (non-bot) members - both keep the bot from sitting connected to dead channe
 """
 
 import asyncio
+import functools
 import logging
 import random
 from collections import deque
@@ -32,13 +37,14 @@ from enum import Enum
 import discord
 import imageio_ffmpeg
 
+from utils.http_audio_source import open_http_stream_sync
 from utils.music_source import Track
 
 logger = logging.getLogger("bot")
 
 IDLE_DISCONNECT_SECONDS = 180
+MAX_CONSECUTIVE_PLAY_FAILURES = 3  # safety valve - stop auto-advancing if every track in a row fails to open
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
-FFMPEG_BEFORE_OPTS = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 FFMPEG_OPTS = "-vn"
 
 
@@ -64,6 +70,7 @@ class GuildPlayer:
         self.on_track_start = None  # optional async callback(track) set by the cog, for now-playing messages
         self._idle_task: asyncio.Task | None = None
         self._skip_requested = False
+        self._consecutive_failures = 0
         self._lock = asyncio.Lock()
 
     # -----------------------------------------------------------------
@@ -116,54 +123,82 @@ class GuildPlayer:
     # -----------------------------------------------------------------
     async def play_next(self) -> None:
         """Advances to the next track and starts playback. Safe to call even if
-        something is already playing (it'll be stopped first)."""
+        something is already playing (it'll be stopped first). Internally retries
+        forward through the queue (without recursing - a plain loop, since re-entering
+        this same coroutine while still holding self._lock would deadlock) if a track
+        fails to open, up to MAX_CONSECUTIVE_PLAY_FAILURES in a row."""
         async with self._lock:
             self._cancel_idle_timer()
+            while True:
+                if self.loop_mode == LoopMode.TRACK and self.current and not self._skip_requested:
+                    next_track = self.current
+                elif self.queue:
+                    next_track = self.queue.popleft()
+                    if self.loop_mode == LoopMode.QUEUE and self.current:
+                        self.queue.append(self.current)
+                else:
+                    next_track = None
 
-            if self.loop_mode == LoopMode.TRACK and self.current and not self._skip_requested:
-                next_track = self.current
-            elif self.queue:
-                next_track = self.queue.popleft()
-                if self.loop_mode == LoopMode.QUEUE and self.current:
-                    self.queue.append(self.current)
-            else:
-                next_track = None
+                self._skip_requested = False
+                self.current = next_track
 
-            self._skip_requested = False
-            self.current = next_track
+                if next_track is None:
+                    self._consecutive_failures = 0
+                    self._start_idle_timer()
+                    return
 
-            if next_track is None:
-                self._start_idle_timer()
-                return
+                if not self.voice_client or not self.voice_client.is_connected():
+                    return
 
-            if not self.voice_client or not self.voice_client.is_connected():
-                return
-
-            source = discord.FFmpegPCMAudio(
-                next_track.stream_url,
-                executable=FFMPEG_EXE,
-                before_options=FFMPEG_BEFORE_OPTS,
-                options=FFMPEG_OPTS,
-            )
-            transformed = discord.PCMVolumeTransformer(source, volume=self.volume)
-
-            def _after(error):
-                if error:
-                    logger.error(f"Playback error in guild {self.guild_id}: {error}")
-                # after() runs in a different thread - hop back onto the bot's event loop
-                fut = asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop)
+                loop = asyncio.get_event_loop()
                 try:
-                    fut.result()
+                    pipe_source = await loop.run_in_executor(
+                        None,
+                        functools.partial(open_http_stream_sync, next_track.stream_url, next_track.http_headers),
+                    )
                 except Exception as e:
-                    logger.error(f"Error advancing queue in guild {self.guild_id}: {e}")
+                    logger.error(f"Failed to open stream for '{next_track.title}' in guild {self.guild_id}: {e}")
+                    self._consecutive_failures += 1
+                    if self.text_channel:
+                        try:
+                            await self.text_channel.send(f"⚠️ Couldn't play **{next_track.title}** - skipping.")
+                        except Exception:
+                            pass
+                    if self._consecutive_failures >= MAX_CONSECUTIVE_PLAY_FAILURES:
+                        logger.error(f"Too many consecutive playback failures in guild {self.guild_id}, stopping.")
+                        self._consecutive_failures = 0
+                        if self.text_channel:
+                            try:
+                                await self.text_channel.send("⚠️ Several tracks in a row failed to play - stopping.")
+                            except Exception:
+                                pass
+                        self.current = None
+                        self._start_idle_timer()
+                        return
+                    continue  # try the next track in the queue, still holding the lock - no recursion
 
-            self.voice_client.play(transformed, after=_after)
+                self._consecutive_failures = 0
+                source = discord.FFmpegPCMAudio(pipe_source, pipe=True, executable=FFMPEG_EXE, options=FFMPEG_OPTS)
+                transformed = discord.PCMVolumeTransformer(source, volume=self.volume)
 
-            if self.on_track_start:
-                try:
-                    await self.on_track_start(next_track)
-                except Exception as e:
-                    logger.error(f"on_track_start callback failed in guild {self.guild_id}: {e}")
+                def _after(error, guild_id=self.guild_id):
+                    if error:
+                        logger.error(f"Playback error in guild {guild_id}: {error}")
+                    # after() runs in a different thread - hop back onto the bot's event loop
+                    fut = asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop)
+                    try:
+                        fut.result()
+                    except Exception as e:
+                        logger.error(f"Error advancing queue in guild {guild_id}: {e}")
+
+                self.voice_client.play(transformed, after=_after)
+
+                if self.on_track_start:
+                    try:
+                        await self.on_track_start(next_track)
+                    except Exception as e:
+                        logger.error(f"on_track_start callback failed in guild {self.guild_id}: {e}")
+                return
 
     def skip(self) -> bool:
         """Stops the current track (triggers the after-callback -> play_next()).
