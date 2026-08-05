@@ -29,6 +29,7 @@ import dataclasses
 import functools
 import re
 import tempfile
+import urllib.request
 
 import aiohttp
 import yt_dlp
@@ -37,6 +38,7 @@ import config
 
 SPOTIFY_URL_RE = re.compile(r"open\.spotify\.com/(track|episode)/([A-Za-z0-9]+)")
 BOT_CHECK_PATTERN = re.compile(r"sign in to confirm|not a bot", re.IGNORECASE)
+NON_AUDIO_CONTENT_TYPES = ("text/html", "text/plain", "application/json")
 
 # Optional cookies support - see module docstring. Written to a temp file once at
 # import time (not per-request); Render's filesystem is otherwise ephemeral but stays
@@ -97,6 +99,32 @@ class ExtractionError(Exception):
 
 def _is_bot_check_error(exc: Exception) -> bool:
     return bool(BOT_CHECK_PATTERN.search(str(exc)))
+
+
+def _sniff_is_audio_sync(url: str, headers: dict | None) -> bool:
+    """
+    Confirms the resolved stream URL actually serves audio/video, not an HTML page.
+    Necessary because YouTube sometimes "succeeds" at extraction (no exception raised
+    anywhere in yt-dlp) while the URL itself only serves a sign-in/consent page when
+    actually fetched - the extraction-time bot-check detection above can't catch that,
+    since nothing raised. A tiny ranged request (first 2KB) is enough to read the
+    Content-Type header without downloading the whole track just to validate it.
+    Fails OPEN (returns True) on any error here - a failed sniff shouldn't block a
+    track that might actually be fine; the real playback attempt will surface a clear
+    failure on its own if something's still wrong.
+    """
+    try:
+        request_headers = dict(headers or {})
+        request_headers.setdefault("User-Agent", "Mozilla/5.0")
+        request_headers["Range"] = "bytes=0-2048"
+        request = urllib.request.Request(url, headers=request_headers)
+        with urllib.request.urlopen(request, timeout=8) as resp:
+            content_type = (resp.headers.get("Content-Type") or "").lower()
+    except Exception:
+        return True
+    if not content_type:
+        return True
+    return not any(content_type.startswith(bad) for bad in NON_AUDIO_CONTENT_TYPES)
 
 
 def _is_url(query: str) -> bool:
@@ -227,7 +255,18 @@ async def resolve_track(query: str, requested_by: int, fallback_query: str | Non
     loop = asyncio.get_event_loop()
     try:
         info = await loop.run_in_executor(None, functools.partial(_extract_sync, query, YTDLP_OPTS))
-        return _track_from_info(info, query, requested_by, source="youtube")
+        track = _track_from_info(info, query, requested_by, source="youtube")
+        is_audio = await loop.run_in_executor(
+            None, functools.partial(_sniff_is_audio_sync, track.stream_url, track.http_headers)
+        )
+        if not is_audio:
+            # Extraction technically "succeeded" (no exception), but the URL itself
+            # only serves an HTML page - functionally the same failure as the caught
+            # bot-check exception below, just undetectable at extraction time.
+            raise yt_dlp.utils.DownloadError(
+                "Sign in to confirm you're not a bot (detected via content-type sniff, not yt-dlp's own error)"
+            )
+        return track
     except ExtractionError:
         raise
     except Exception as e:
