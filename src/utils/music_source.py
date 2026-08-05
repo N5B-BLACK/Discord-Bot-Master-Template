@@ -29,6 +29,8 @@ import dataclasses
 import functools
 import re
 import tempfile
+import urllib.error
+import urllib.request
 
 import aiohttp
 import yt_dlp
@@ -37,6 +39,7 @@ import config
 
 SPOTIFY_URL_RE = re.compile(r"open\.spotify\.com/(track|episode)/([A-Za-z0-9]+)")
 BOT_CHECK_PATTERN = re.compile(r"sign in to confirm|not a bot", re.IGNORECASE)
+NON_AUDIO_CONTENT_TYPES = ("text/html", "text/plain", "application/json")
 
 # Optional cookies support - see module docstring. Written to a temp file once at
 # import time (not per-request); Render's filesystem is otherwise ephemeral but stays
@@ -97,6 +100,36 @@ class ExtractionError(Exception):
 
 def _is_bot_check_error(exc: Exception) -> bool:
     return bool(BOT_CHECK_PATTERN.search(str(exc)))
+
+
+def _sniff_is_audio_sync(url: str, headers: dict | None) -> bool:
+    """
+    Confirms the resolved stream URL actually serves audio/video, not an HTML/error
+    page. Necessary because YouTube sometimes "succeeds" at extraction (no exception
+    raised anywhere in yt-dlp) while the URL itself only serves a sign-in/consent page
+    - or an outright 401/403 - when actually fetched. A tiny ranged request (first 2KB)
+    is enough to check without downloading the whole track just to validate it.
+
+    Fails OPEN (returns True) for ambiguous problems - timeouts, DNS issues, connection
+    resets - since those shouldn't block a track that might genuinely be fine. But
+    fails CLOSED (returns False) for an explicit 401/403, and for a 2xx response whose
+    Content-Type is clearly not audio/video - both are strong, specific signals of
+    exactly this bot-check problem, not a transient network hiccup.
+    """
+    try:
+        request_headers = dict(headers or {})
+        request_headers.setdefault("User-Agent", "Mozilla/5.0")
+        request_headers["Range"] = "bytes=0-2048"
+        request = urllib.request.Request(url, headers=request_headers)
+        with urllib.request.urlopen(request, timeout=8) as resp:
+            content_type = (resp.headers.get("Content-Type") or "").lower()
+    except urllib.error.HTTPError as e:
+        return e.code not in (401, 403)
+    except Exception:
+        return True
+    if not content_type:
+        return True
+    return not any(content_type.startswith(bad) for bad in NON_AUDIO_CONTENT_TYPES)
 
 
 def _is_url(query: str) -> bool:
@@ -225,14 +258,30 @@ async def resolve_track(query: str, requested_by: int, fallback_query: str | Non
         query = title  # falls through to a normal search below
 
     loop = asyncio.get_event_loop()
+    track = None  # only gets set if extraction succeeded and the sniff check ran - guards the except block below
     try:
         info = await loop.run_in_executor(None, functools.partial(_extract_sync, query, YTDLP_OPTS))
-        return _track_from_info(info, query, requested_by, source="youtube")
+        track = _track_from_info(info, query, requested_by, source="youtube")
+        is_audio = await loop.run_in_executor(
+            None, functools.partial(_sniff_is_audio_sync, track.stream_url, track.http_headers)
+        )
+        if not is_audio:
+            # Extraction technically "succeeded" (no exception), but the URL itself
+            # only serves an HTML/error page - functionally the same failure as the
+            # caught bot-check exception below, just undetectable at extraction time.
+            raise yt_dlp.utils.DownloadError(
+                "Sign in to confirm you're not a bot (detected via content sniff, not yt-dlp's own error)"
+            )
+        return track
     except ExtractionError:
         raise
     except Exception as e:
         if _is_bot_check_error(e):
-            retry_text = fallback_query or (query if not _is_url(query) else None)
+            # Prefer the title yt-dlp already extracted (available even for a raw pasted
+            # URL, since yt-dlp usually gets metadata even when the stream itself is
+            # gated) over the raw query - a video ID/URL is useless as a SoundCloud
+            # search term, but its title usually works fine.
+            retry_text = fallback_query or (track.title if track else None) or (query if not _is_url(query) else None)
             if retry_text:
                 try:
                     sc_info = await loop.run_in_executor(
