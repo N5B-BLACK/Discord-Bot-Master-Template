@@ -12,21 +12,33 @@ duration of the extraction.
 RELIABILITY NOTE: YouTube increasingly returns "Sign in to confirm you're not a bot"
 for requests from datacenter/cloud IPs (Render included) - a bot-detection challenge,
 not the same as a hard IP ban, but with the same practical effect: the track won't
-play. Two mitigations are built in:
-1. Optional cookies (YTDLP_COOKIES_B64 env var, base64-encoded Netscape cookies.txt
-   exported from a real logged-in YouTube session) - the most reliable fix, but has a
-   real account-ban-risk tradeoff the deployer should weigh themselves. Entirely
-   optional; everything works without it, just less reliably on flagged IPs.
-2. Automatic SoundCloud fallback - if a YouTube resolution hits this specific
-   bot-check error and a plain-text query is available (from the search picker), it's
-   silently retried on SoundCloud, which doesn't have this restriction. Smaller
-   catalog than YouTube, but a real, working result beats an error.
+play. Mitigations built in:
+1. Format selection explicitly EXCLUDES HLS/DASH-protocol formats (see FORMAT_SELECTOR
+   below). This isn't about bot-check at all - it's a hard architectural requirement:
+   this bot pipes audio bytes through FFmpeg's stdin (see http_audio_source.py) rather
+   than letting FFmpeg fetch the URL itself (that segfaults on this host's FFmpeg
+   build - see music_player.py's docstring). HLS/DASH streams are manifests that
+   reference separate segment URLs FFmpeg must fetch itself mid-decode - fundamentally
+   incompatible with the pipe approach, since nothing refetches those segments over
+   the pipe. Without this exclusion, a video whose only available formats are
+   HLS-based fails with a confusing "Invalid data found when processing input" that
+   looks unrelated to the real cause.
+2. Optional cookies (YTDLP_COOKIES_B64 env var, base64-encoded Netscape cookies.txt
+   exported from a real logged-in YouTube session) - the most reliable fix for the
+   bot-check specifically, but has a real account-ban-risk tradeoff the deployer
+   should weigh themselves. Entirely optional; everything works without it, just less
+   reliably on flagged IPs.
+3. Automatic SoundCloud fallback - triggered on ANY YouTube resolution failure (not
+   just pattern-matched bot-check errors - format-unavailable, region-locked, etc all
+   degrade the same way) as long as a plain-text query is available to search with.
+   Smaller catalog than YouTube, but a real, working result beats an error.
 """
 
 import asyncio
 import base64
 import dataclasses
 import functools
+import logging
 import re
 import tempfile
 import urllib.error
@@ -37,9 +49,18 @@ import yt_dlp
 
 import config
 
+logger = logging.getLogger("bot")
+
 SPOTIFY_URL_RE = re.compile(r"open\.spotify\.com/(track|episode)/([A-Za-z0-9]+)")
 BOT_CHECK_PATTERN = re.compile(r"sign in to confirm|not a bot", re.IGNORECASE)
 NON_AUDIO_CONTENT_TYPES = ("text/html", "text/plain", "application/json")
+
+# Excludes any format whose protocol contains "m3u8" (HLS) or "dash" - see the
+# RELIABILITY NOTE above for why. Falls back to plain "bestaudio/best" only if
+# every single available format is HLS/DASH (rare, but better to attempt playback
+# than to refuse outright - the sniff check below still catches an actually-broken
+# result either way).
+FORMAT_SELECTOR = "bestaudio[protocol!*=m3u8][protocol!*=dash]/best[protocol!*=m3u8][protocol!*=dash]/bestaudio/best"
 
 # Optional cookies support - see module docstring. Written to a temp file once at
 # import time (not per-request); Render's filesystem is otherwise ephemeral but stays
@@ -56,7 +77,7 @@ if getattr(config, "YTDLP_COOKIES_B64", None):
         _COOKIES_FILE_PATH = None  # bad/missing env var - silently continue without cookies
 
 YTDLP_OPTS = {
-    "format": "bestaudio/best",
+    "format": FORMAT_SELECTOR,
     "noplaylist": True,
     "quiet": True,
     "no_warnings": True,
@@ -68,9 +89,9 @@ if _COOKIES_FILE_PATH:
     YTDLP_OPTS["cookiefile"] = _COOKIES_FILE_PATH
 
 # Same shape as YTDLP_OPTS but searches SoundCloud instead - the automatic fallback
-# when YouTube hits its bot-check wall. No cookies needed/supported here.
+# when YouTube resolution fails for any reason. No cookies needed/supported here.
 YTDLP_OPTS_SOUNDCLOUD = {
-    "format": "bestaudio/best",
+    "format": FORMAT_SELECTOR,
     "noplaylist": True,
     "quiet": True,
     "no_warnings": True,
@@ -92,6 +113,9 @@ class Track:
     http_headers: dict | None = None  # some CDNs (SoundCloud especially) need the same headers yt-dlp
     # used to authorize the URL, or they serve an empty/broken response - attached to the
     # urllib request in utils/http_audio_source.py, not passed to FFmpeg (which no longer touches the network at all)
+    is_hls_or_dash: bool = False  # True if this format is a manifest-based stream (m3u8/DASH) - incompatible
+    # with piping through FFmpeg's stdin (see FORMAT_SELECTOR above); resolve_track() avoids returning
+    # these when it can, but this flag lets a caller double-check/reject one if it ever slips through
 
 
 class ExtractionError(Exception):
@@ -210,6 +234,7 @@ async def search_candidates(query: str, limit: int = 5) -> list[dict]:
 def _track_from_info(info: dict, query: str, requested_by: int, source: str) -> Track:
     stream_url = info.get("url")
     http_headers = info.get("http_headers")
+    protocol = info.get("protocol") or ""
     if not stream_url:
         # some extractors return a "formats" list instead of a top-level url
         formats = info.get("formats") or []
@@ -219,6 +244,7 @@ def _track_from_info(info: dict, query: str, requested_by: int, source: str) -> 
         chosen = audio_formats[-1]
         stream_url = chosen["url"]
         http_headers = chosen.get("http_headers") or http_headers
+        protocol = chosen.get("protocol") or protocol
 
     return Track(
         title=info.get("title") or query,
@@ -230,7 +256,42 @@ def _track_from_info(info: dict, query: str, requested_by: int, source: str) -> 
         requested_by=requested_by,
         source=source,
         http_headers=http_headers or None,
+        is_hls_or_dash=("m3u8" in protocol or "dash" in protocol),
     )
+
+
+class _ValidationFailure(ExtractionError):
+    """Raised by _resolve_and_validate when extraction succeeded but the result failed
+    a post-extraction check (HLS/DASH, content sniff) - carries the partially-built
+    Track so resolve_track() can reuse its title for a SoundCloud retry without paying
+    for a second, redundant extraction just to re-discover the same title."""
+
+    def __init__(self, message: str, track: "Track"):
+        super().__init__(message)
+        self.track = track
+
+
+async def _resolve_and_validate(query: str, opts: dict, requested_by: int, source: str, loop) -> Track:
+    """Extracts + builds a Track + runs it through every validity check (HLS rejection,
+    content sniff). Raises on any failure - never returns a Track that's known-bad.
+    Shared by both the YouTube attempt and the SoundCloud fallback attempt, so both
+    get the exact same validation instead of the fallback being a lower-trust path."""
+    info = await loop.run_in_executor(None, functools.partial(_extract_sync, query, opts))
+    track = _track_from_info(info, query, requested_by, source=source)
+
+    if track.is_hls_or_dash:
+        raise _ValidationFailure(
+            f"'{track.title}' is only available as an adaptive stream (HLS/DASH), which this bot can't play.",
+            track,
+        )
+
+    is_audio = await loop.run_in_executor(None, functools.partial(_sniff_is_audio_sync, track.stream_url, track.http_headers))
+    if not is_audio:
+        raise _ValidationFailure(
+            f"'{track.title}' didn't return playable audio (likely a bot-check or region block).", track
+        )
+
+    return track
 
 
 async def resolve_track(query: str, requested_by: int, fallback_query: str | None = None) -> Track:
@@ -241,9 +302,9 @@ async def resolve_track(query: str, requested_by: int, fallback_query: str | Non
     title is resolved via oEmbed and re-searched instead.
 
     fallback_query: plain text (usually the picked result's title, from the search
-    picker) to retry on SoundCloud if the primary YouTube resolution hits its
-    bot-check wall. Without it (e.g. a raw URL typed directly with no known title), a
-    bot-check failure is surfaced as a clear error instead of silently guessing.
+    picker) to retry on SoundCloud if the primary YouTube resolution fails for any
+    reason. Without it (e.g. a raw URL with no extractable title at all), a failure is
+    surfaced as a clear error instead of silently guessing what to search for.
     """
     query = query.strip()
 
@@ -258,40 +319,49 @@ async def resolve_track(query: str, requested_by: int, fallback_query: str | Non
         query = title  # falls through to a normal search below
 
     loop = asyncio.get_event_loop()
-    track = None  # only gets set if extraction succeeded and the sniff check ran - guards the except block below
+
     try:
-        info = await loop.run_in_executor(None, functools.partial(_extract_sync, query, YTDLP_OPTS))
-        track = _track_from_info(info, query, requested_by, source="youtube")
-        is_audio = await loop.run_in_executor(
-            None, functools.partial(_sniff_is_audio_sync, track.stream_url, track.http_headers)
-        )
-        if not is_audio:
-            # Extraction technically "succeeded" (no exception), but the URL itself
-            # only serves an HTML/error page - functionally the same failure as the
-            # caught bot-check exception below, just undetectable at extraction time.
-            raise yt_dlp.utils.DownloadError(
-                "Sign in to confirm you're not a bot (detected via content sniff, not yt-dlp's own error)"
-            )
+        logger.info(f"[music] Resolving via YouTube: {query!r}")
+        track = await _resolve_and_validate(query, YTDLP_OPTS, requested_by, "youtube", loop)
+        logger.info(f"[music] YouTube resolution OK: '{track.title}' (protocol-safe, passed content sniff)")
         return track
-    except ExtractionError:
-        raise
     except Exception as e:
-        if _is_bot_check_error(e):
-            # Prefer the title yt-dlp already extracted (available even for a raw pasted
-            # URL, since yt-dlp usually gets metadata even when the stream itself is
-            # gated) over the raw query - a video ID/URL is useless as a SoundCloud
-            # search term, but its title usually works fine.
-            retry_text = fallback_query or (track.title if track else None) or (query if not _is_url(query) else None)
-            if retry_text:
-                try:
-                    sc_info = await loop.run_in_executor(
-                        None, functools.partial(_extract_sync, retry_text, YTDLP_OPTS_SOUNDCLOUD)
-                    )
-                    return _track_from_info(sc_info, retry_text, requested_by, source="soundcloud")
-                except Exception:
-                    pass  # fall through to the YouTube error below - it's the more actionable one
+        logger.warning(f"[music] YouTube resolution failed for {query!r}: {e}")
+
+        yt_title_hint = e.track.title if isinstance(e, _ValidationFailure) else None
+        if yt_title_hint is None and fallback_query is None:
+            # Extraction itself raised with nothing usable at all (no partial Track) -
+            # one lightweight, metadata-only attempt (skips format/stream resolution,
+            # so it's far less likely to hit the same wall) just to get a search-able
+            # title instead of giving up immediately.
+            try:
+                info = await loop.run_in_executor(
+                    None, functools.partial(_extract_sync, query, {**YTDLP_OPTS, "extract_flat": True})
+                )
+                yt_title_hint = info.get("title")
+            except Exception:
+                pass
+
+        retry_text = fallback_query or yt_title_hint or (query if not _is_url(query) else None)
+        if not retry_text:
             raise ExtractionError(
-                "YouTube is asking this bot to verify it's not a bot (a known issue on cloud hosts). "
-                "Try again in a moment, or ask the bot owner to configure cookies for more reliable playback."
+                "Couldn't play that from YouTube, and there's no title to search on SoundCloud instead "
+                "(try searching by song name rather than pasting the link)."
             ) from e
-        raise ExtractionError(f"Couldn't play that: {str(e).split('ERROR:')[-1].strip()[:200]}") from e
+
+        try:
+            logger.info(f"[music] Falling back to SoundCloud: {retry_text!r}")
+            track = await _resolve_and_validate(retry_text, YTDLP_OPTS_SOUNDCLOUD, requested_by, "soundcloud", loop)
+            logger.info(f"[music] SoundCloud fallback OK: '{track.title}'")
+            return track
+        except Exception as e2:
+            logger.warning(f"[music] SoundCloud fallback also failed for {retry_text!r}: {e2}")
+            if _is_bot_check_error(e):
+                raise ExtractionError(
+                    "YouTube is asking this bot to verify it's not a bot (a known issue on cloud hosts), "
+                    "and the SoundCloud fallback didn't find a match either. "
+                    "Try again in a moment, or ask the bot owner to configure cookies for more reliable playback."
+                ) from e2
+            raise ExtractionError(
+                f"Couldn't play that: {str(e).split('ERROR:')[-1].strip()[:200]}"
+            ) from e2
