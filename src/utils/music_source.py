@@ -271,11 +271,20 @@ class _ValidationFailure(ExtractionError):
         self.track = track
 
 
-async def _resolve_and_validate(query: str, opts: dict, requested_by: int, source: str, loop) -> Track:
-    """Extracts + builds a Track + runs it through every validity check (HLS rejection,
-    content sniff). Raises on any failure - never returns a Track that's known-bad.
-    Shared by both the YouTube attempt and the SoundCloud fallback attempt, so both
-    get the exact same validation instead of the fallback being a lower-trust path."""
+async def _resolve_and_validate(
+    query: str, opts: dict, requested_by: int, source: str, loop, skip_sniff: bool = False
+) -> Track:
+    """Extracts + builds a Track + runs it through validity checks (HLS rejection,
+    optionally the content sniff). Raises on any failure - never returns a Track
+    that's known-bad. Shared by both the YouTube attempt and the SoundCloud fallback
+    attempt.
+
+    skip_sniff exists purely for latency: the sniff costs one extra network round-trip
+    (checking the resolved URL actually serves audio before trusting it), which matters
+    for YouTube because it's the one that's been observed "succeeding" while actually
+    returning a bot-check page. SoundCloud hasn't shown that failure mode, so for the
+    fallback path it's skipped - a bad SoundCloud URL would still get caught (just one
+    step later) by music_player.py's existing play-time failure/auto-skip handling."""
     info = await loop.run_in_executor(None, functools.partial(_extract_sync, query, opts))
     track = _track_from_info(info, query, requested_by, source=source)
 
@@ -285,11 +294,14 @@ async def _resolve_and_validate(query: str, opts: dict, requested_by: int, sourc
             track,
         )
 
-    is_audio = await loop.run_in_executor(None, functools.partial(_sniff_is_audio_sync, track.stream_url, track.http_headers))
-    if not is_audio:
-        raise _ValidationFailure(
-            f"'{track.title}' didn't return playable audio (likely a bot-check or region block).", track
+    if not skip_sniff:
+        is_audio = await loop.run_in_executor(
+            None, functools.partial(_sniff_is_audio_sync, track.stream_url, track.http_headers)
         )
+        if not is_audio:
+            raise _ValidationFailure(
+                f"'{track.title}' didn't return playable audio (likely a bot-check or region block).", track
+            )
 
     return track
 
@@ -351,7 +363,9 @@ async def resolve_track(query: str, requested_by: int, fallback_query: str | Non
 
         try:
             logger.info(f"[music] Falling back to SoundCloud: {retry_text!r}")
-            track = await _resolve_and_validate(retry_text, YTDLP_OPTS_SOUNDCLOUD, requested_by, "soundcloud", loop)
+            track = await _resolve_and_validate(
+                retry_text, YTDLP_OPTS_SOUNDCLOUD, requested_by, "soundcloud", loop, skip_sniff=True
+            )
             logger.info(f"[music] SoundCloud fallback OK: '{track.title}'")
             return track
         except Exception as e2:

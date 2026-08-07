@@ -19,6 +19,8 @@ control playback - no separate DJ-role system, consistent with the rest of the
 template.
 """
 
+import asyncio
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -359,15 +361,25 @@ class Music(commands.Cog):
 
             await interaction.response.defer()
 
-            try:
-                await player.connect(user_channel)
-            except discord.ClientException as e:
-                await interaction.followup.send(f"⚠️ Couldn't join your voice channel: {e}")
-                return
+            # Runs in the background while we search/resolve below - the voice
+            # handshake (typically 1-2s) would otherwise be pure added latency in
+            # front of the (usually slower) track resolution, for no reason: neither
+            # step depends on the other until we're actually ready to call .play().
+            connect_task = asyncio.ensure_future(player.connect(user_channel))
+
+            async def _await_connect() -> bool:
+                """Returns True if connected OK; sends the error and returns False otherwise."""
+                try:
+                    await connect_task
+                    return True
+                except discord.ClientException as e:
+                    await interaction.followup.send(f"⚠️ Couldn't join your voice channel: {e}")
+                    return False
 
             try:
                 candidates = await search_candidates(query, limit=5)
             except ExtractionError as e:
+                connect_task.cancel()
                 await interaction.followup.send(f"⚠️ {e}")
                 return
 
@@ -376,7 +388,10 @@ class Music(commands.Cog):
                 try:
                     track = await resolve_track(query, interaction.user.id)
                 except ExtractionError as e:
+                    connect_task.cancel()
                     await interaction.followup.send(f"⚠️ {e}")
+                    return
+                if not await _await_connect():
                     return
                 player.on_track_start = lambda t: self._on_track_start(interaction.guild_id, t)
                 await interaction.followup.send(f"🔎 Found **{track.title}**.")
@@ -389,6 +404,8 @@ class Music(commands.Cog):
                     track = await resolve_track(chosen_url, interaction.user.id, fallback_query=chosen_title)
                 except ExtractionError as e:
                     await interaction.followup.send(f"⚠️ {e}")
+                    return
+                if not await _await_connect():
                     return
                 player.on_track_start = lambda t: self._on_track_start(interaction.guild_id, t)
                 await self._start_or_queue(interaction, player, track, interaction.channel)
