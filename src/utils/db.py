@@ -44,6 +44,12 @@ DEFAULT_SETTINGS = {
     "timeout_log_channel_id": None,
     "kicked_log_channel_id": None,
     "setup_update_log_channel_id": None,
+    "message_edit_log_channel_id": None,
+    "message_bulk_delete_log_channel_id": None,
+    "channel_log_channel_id": None,
+    "role_log_channel_id": None,
+    "member_update_log_channel_id": None,
+    "trap_channel_id": None,
     "embed_color": None,
     "embed_icon_url": None,
     "embed_footer_text": None,
@@ -52,6 +58,7 @@ DEFAULT_SETTINGS = {
     "welcome_embed_template": None,
     "ticket_panel_embed_template": None,
     "ticket_open_embed_template": None,
+    "auto_divider": {"enabled": False, "image_url": None, "channel_ids": []},
 }
 
 
@@ -194,3 +201,39 @@ async def get_embed_draft(guild_id: int, name: str):
 
 async def delete_embed_draft(guild_id: int, name: str) -> None:
     await _embed_drafts.delete_one({"guild_id": guild_id, "name": name})
+
+
+# ---------------------------------------------------------
+# Auto Divider - posts a configured image after every message in chosen channels.
+# Stored as one nested doc (not flat settings keys) since it has a list field
+# (channel_ids) that needs atomic add/remove operations.
+# ---------------------------------------------------------
+async def set_auto_divider_image(guild_id: int, image_url: str | None) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$set": {"auto_divider.image_url": image_url, "guild_id": guild_id}},
+        upsert=True,
+    )
+
+
+async def set_auto_divider_enabled(guild_id: int, enabled: bool) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$set": {"auto_divider.enabled": enabled, "guild_id": guild_id}},
+        upsert=True,
+    )
+
+
+async def add_auto_divider_channel(guild_id: int, channel_id: int) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$addToSet": {"auto_divider.channel_ids": channel_id}, "$set": {"guild_id": guild_id}},
+        upsert=True,
+    )
+
+
+async def remove_auto_divider_channel(guild_id: int, channel_id: int) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$pull": {"auto_divider.channel_ids": channel_id}},
+    )

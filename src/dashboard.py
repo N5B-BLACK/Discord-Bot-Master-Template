@@ -29,11 +29,15 @@ from cryptography.fernet import Fernet
 
 import config
 from utils.db import (
+    add_auto_divider_channel,
     delete_embed_draft,
     get_embed_draft,
     get_guild_settings,
     list_embed_drafts,
+    remove_auto_divider_channel,
     save_embed_draft,
+    set_auto_divider_enabled,
+    set_auto_divider_image,
     set_log_color,
     update_guild_setting,
 )
@@ -84,6 +88,16 @@ SETTINGS_GROUPS = [
         ("kicked_log_channel_id", "Kick Log", "channel", True),
         ("setup_update_log_channel_id", "Settings Update Log", "channel", True),
     ]),
+    ("Server Activity Logs", [
+        ("message_edit_log_channel_id", "Message Edit Log", "channel", True),
+        ("message_bulk_delete_log_channel_id", "Bulk Delete Log", "channel", True),
+        ("channel_log_channel_id", "Channel Create/Delete/Update Log", "channel", True),
+        ("role_log_channel_id", "Role Create/Delete/Update Log", "channel", True),
+        ("member_update_log_channel_id", "Nickname/Role Change Log", "channel", True),
+    ]),
+    ("Security", [
+        ("trap_channel_id", "Trap Channel (auto-ban on post)", "channel", False),
+    ]),
 ]
 VALID_KEYS = {key for _, fields in SETTINGS_GROUPS for key, _, _, _ in fields}
 LOG_COLOR_KEYS = {key for _, fields in SETTINGS_GROUPS for key, _, _, colorable in fields if colorable}
@@ -95,6 +109,7 @@ NAV_ITEMS = [
     ("tickets", "Ticket Panel", "tickets"),
     ("embeds", "Embed Builder", "embeds"),
     ("templates", "Message Templates", "templates"),
+    ("divider", "Auto Divider", "divider"),
 ]
 
 
@@ -1035,6 +1050,101 @@ async def templates_page(request: web.Request, bot) -> web.Response:
 
 
 
+async def divider_page(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id)
+    if not isinstance(guard, discord.Guild):
+        return guard
+    guild = guard
+
+    settings = await get_guild_settings(guild_id)
+    divider = settings.get("auto_divider") or {}
+    enabled = bool(divider.get("enabled"))
+    image_url = divider.get("image_url") or ""
+    channel_ids = divider.get("channel_ids") or []
+
+    channel_rows = ""
+    for cid in channel_ids:
+        channel = guild.get_channel(cid)
+        label = f"#{channel.name}" if channel else f"Unknown channel ({cid})"
+        channel_rows += f"""
+        <div class="field">
+            <label>{label}</label>
+            <div class="field-right">
+                <button class="btn danger" data-remove-channel="{cid}">Remove</button>
+            </div>
+        </div>
+        """
+    if not channel_rows:
+        channel_rows = '<p class="group-hint">No channels added yet - pick one below.</p>'
+
+    add_channel_options = _build_options(guild, "channel", None)
+
+    preview_html = (
+        f'<img src="{image_url}" alt="Divider preview" style="max-width:100%;border-radius:8px;border:1px solid var(--border);margin-top:10px;">'
+        if image_url
+        else '<p class="group-hint">No image set yet.</p>'
+    )
+
+    content = f"""
+    <div class="eyebrow">Auto Divider</div>
+    <h1>Post an image after every message</h1>
+    <p class="subtitle">
+        In the channels you choose below, the bot automatically posts this image right after
+        every message a member sends - useful as a visual separator in showcase or media channels.
+    </p>
+
+    <div class="group">
+        <div class="action-row">
+            <label style="display:flex;align-items:center;gap:10px;font-size:14px;">
+                <input type="checkbox" id="divider-enabled" {"checked" if enabled else ""} style="width:18px;height:18px;">
+                Enabled
+            </label>
+            <span class="status" id="enabled-status"></span>
+        </div>
+    </div>
+
+    <div class="group">
+        <h2>Image</h2>
+        <div class="field">
+            <label>Image URL</label>
+            <div class="field-right">
+                <input type="url" id="divider-image-url" placeholder="https://..." value="{image_url}" style="min-width:280px;">
+            </div>
+        </div>
+        <div class="action-row">
+            <span></span>
+            <div class="field-right">
+                <button class="btn" id="save-image-btn">Save image</button>
+                <span class="status" id="image-status"></span>
+            </div>
+        </div>
+        <div id="image-preview">{preview_html}</div>
+    </div>
+
+    <div class="group">
+        <h2>Channels</h2>
+        <div id="channel-list">{channel_rows}</div>
+        <div class="action-row">
+            <select id="add-channel-select">{add_channel_options}</select>
+            <div class="field-right">
+                <button class="btn" id="add-channel-btn">Add channel</button>
+                <span class="status" id="add-channel-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
+    <script>{DIVIDER_JS}</script>
+    """
+    body = _sidebar_shell(guild, _icon_url(guild), "divider", content)
+    return web.Response(
+        text=_page_shell(f"{guild.name} · Auto Divider", SIDEBAR_STYLES + SETTINGS_STYLES, body),
+        content_type="text/html",
+    )
+
+
+
 async def embeds_page(request: web.Request, bot) -> web.Response:
     guild_id = int(request.match_info["guild_id"])
     access_token, guard = await _guarded_guild(request, bot, guild_id)
@@ -1243,6 +1353,87 @@ document.querySelectorAll('select[data-slot]').forEach(function (sel) {
             statusEl.className = 'status show err';
         }
         setTimeout(function () { statusEl.classList.remove('show'); }, 1500);
+    });
+});
+"""
+
+DIVIDER_JS = """
+const enabledCheckbox = document.getElementById('divider-enabled');
+enabledCheckbox.addEventListener('change', async function () {
+    const statusEl = document.getElementById('enabled-status');
+    try {
+        const res = await fetch(API_BASE + '/divider/enabled', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: enabledCheckbox.checked }),
+        });
+        if (!res.ok) throw new Error('save failed');
+        statusEl.textContent = 'Saved';
+        statusEl.className = 'status show ok';
+    } catch (e) {
+        statusEl.textContent = 'Error';
+        statusEl.className = 'status show err';
+    }
+    setTimeout(function () { statusEl.classList.remove('show'); }, 1500);
+});
+
+document.getElementById('save-image-btn').addEventListener('click', async function () {
+    const url = document.getElementById('divider-image-url').value.trim();
+    const statusEl = document.getElementById('image-status');
+    try {
+        const res = await fetch(API_BASE + '/divider/image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_url: url || null }),
+        });
+        if (!res.ok) throw new Error('save failed');
+        statusEl.textContent = 'Saved';
+        statusEl.className = 'status show ok';
+        const preview = document.getElementById('image-preview');
+        preview.innerHTML = url
+            ? '<img src="' + url + '" alt="Divider preview" style="max-width:100%;border-radius:8px;border:1px solid var(--border);margin-top:10px;">'
+            : '<p class="group-hint">No image set yet.</p>';
+    } catch (e) {
+        statusEl.textContent = 'Error';
+        statusEl.className = 'status show err';
+    }
+    setTimeout(function () { statusEl.classList.remove('show'); }, 1500);
+});
+
+document.getElementById('add-channel-btn').addEventListener('click', async function () {
+    const channelId = document.getElementById('add-channel-select').value;
+    const statusEl = document.getElementById('add-channel-status');
+    if (!channelId) {
+        statusEl.textContent = 'Pick a channel';
+        statusEl.className = 'status show err';
+        setTimeout(function () { statusEl.classList.remove('show'); }, 1500);
+        return;
+    }
+    try {
+        const res = await fetch(API_BASE + '/divider/channels', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel_id: channelId }),
+        });
+        if (!res.ok) throw new Error('save failed');
+        location.reload();
+    } catch (e) {
+        statusEl.textContent = 'Error';
+        statusEl.className = 'status show err';
+        setTimeout(function () { statusEl.classList.remove('show'); }, 1500);
+    }
+});
+
+document.querySelectorAll('[data-remove-channel]').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+        const channelId = btn.dataset.removeChannel;
+        try {
+            const res = await fetch(API_BASE + '/divider/channels/' + channelId, { method: 'DELETE' });
+            if (!res.ok) throw new Error('remove failed');
+            location.reload();
+        } catch (e) {
+            btn.textContent = 'Error';
+        }
     });
 });
 """
@@ -1579,6 +1770,60 @@ async def save_template_slot(request: web.Request, bot) -> web.Response:
     return web.json_response({"ok": True})
 
 
+async def save_divider_enabled(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    await set_auto_divider_enabled(guild_id, bool(body.get("enabled")))
+    return web.json_response({"ok": True})
+
+
+async def save_divider_image(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    image_url = (body.get("image_url") or "").strip() or None
+    await set_auto_divider_image(guild_id, image_url)
+    return web.json_response({"ok": True})
+
+
+async def add_divider_channel_route(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    try:
+        channel_id = int(body.get("channel_id"))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "invalid channel"}, status=400)
+
+    await add_auto_divider_channel(guild_id, channel_id)
+    return web.json_response({"ok": True})
+
+
+async def remove_divider_channel_route(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    try:
+        channel_id = int(request.match_info["channel_id"])
+    except (TypeError, ValueError):
+        return web.json_response({"error": "invalid channel"}, status=400)
+
+    await remove_auto_divider_channel(guild_id, channel_id)
+    return web.json_response({"ok": True})
+
+
 async def post_ticket_panel(request: web.Request, bot) -> web.Response:
     guild_id = int(request.match_info["guild_id"])
     access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
@@ -1709,6 +1954,7 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_get("/dashboard/{guild_id}/tickets", lambda request: tickets_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/embeds", lambda request: embeds_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/templates", lambda request: templates_page(request, bot))
+    app.router.add_get("/dashboard/{guild_id}/divider", lambda request: divider_page(request, bot))
 
     app.router.add_post("/dashboard/{guild_id}/api/settings", lambda request: save_guild_setting(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/log-color", lambda request: save_log_color(request, bot))
@@ -1720,3 +1966,7 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_delete("/dashboard/{guild_id}/api/embeds/{name}", lambda request: embeds_delete_one(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/embeds/save", lambda request: embeds_save(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/embeds/send", lambda request: embeds_send(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/divider/enabled", lambda request: save_divider_enabled(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/divider/image", lambda request: save_divider_image(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/divider/channels", lambda request: add_divider_channel_route(request, bot))
+    app.router.add_delete("/dashboard/{guild_id}/api/divider/channels/{channel_id}", lambda request: remove_divider_channel_route(request, bot))

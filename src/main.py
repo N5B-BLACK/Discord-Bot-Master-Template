@@ -51,6 +51,9 @@ COGS = [
     "cogs.music",
     "cogs.voice_logs",
     "cogs.audit_logs",
+    "cogs.server_logs",
+    "cogs.trap_channel",
+    "cogs.auto_divider",
 ]
 
 

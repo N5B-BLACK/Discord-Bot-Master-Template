@@ -72,7 +72,7 @@ def _page1_embed(settings: dict) -> discord.Embed:
         f"4️⃣ Kick log channel: {_mention(settings, 'kicked_log_channel_id', 'channel')}\n\n"
         "Click **Next ▶️** for more settings."
     )
-    return discord.Embed(title="⚙️ Bot Settings (1/5) · Core Moderation", description=description, color=discord.Color.blurple())
+    return discord.Embed(title="⚙️ Bot Settings (1/7) · Core Moderation", description=description, color=discord.Color.blurple())
 
 
 def _page2_embed(settings: dict) -> discord.Embed:
@@ -84,7 +84,7 @@ def _page2_embed(settings: dict) -> discord.Embed:
         f"8️⃣ Server join/leave log: {_mention(settings, 'server_join_leave_log_channel_id', 'channel')}\n\n"
         "Humans and bots get separate auto-roles since they usually need different permissions."
     )
-    return discord.Embed(title="⚙️ Bot Settings (2/5) · Members & Welcome", description=description, color=discord.Color.blurple())
+    return discord.Embed(title="⚙️ Bot Settings (2/7) · Members & Welcome", description=description, color=discord.Color.blurple())
 
 
 def _page3_embed(settings: dict) -> discord.Embed:
@@ -96,7 +96,7 @@ def _page3_embed(settings: dict) -> discord.Embed:
         "To post the ticket panel itself (the \"🎫 Open Ticket\" button), use the dashboard's "
         "Ticket Panel page or `/ticket-panel` - that's an action, not a setting, so it isn't here."
     )
-    return discord.Embed(title="⚙️ Bot Settings (3/5) · AI & Tickets", description=description, color=discord.Color.blurple())
+    return discord.Embed(title="⚙️ Bot Settings (3/7) · AI & Tickets", description=description, color=discord.Color.blurple())
 
 
 def _page4_embed(settings: dict) -> discord.Embed:
@@ -108,7 +108,7 @@ def _page4_embed(settings: dict) -> discord.Embed:
         f"1️⃣4️⃣ Voice disconnect: {_mention(settings, 'voice_disconnect_log_channel_id', 'channel')}\n"
         f"1️⃣5️⃣ Voice mute/unmute: {_mention(settings, 'voice_mute_log_channel_id', 'channel')}"
     )
-    return discord.Embed(title="⚙️ Bot Settings (4/5) · Voice Logs", description=description, color=discord.Color.blurple())
+    return discord.Embed(title="⚙️ Bot Settings (4/7) · Voice Logs", description=description, color=discord.Color.blurple())
 
 
 def _page5_embed(settings: dict) -> discord.Embed:
@@ -119,9 +119,39 @@ def _page5_embed(settings: dict) -> discord.Embed:
         f"1️⃣7️⃣ Message deletion log: {_mention(settings, 'msg_deleted_log_channel_id', 'channel')}\n"
         f"1️⃣8️⃣ Timeout log: {_mention(settings, 'timeout_log_channel_id', 'channel')}\n"
         f"1️⃣9️⃣ Settings-update log: {_mention(settings, 'setup_update_log_channel_id', 'channel')}\n\n"
-        "The settings-update log records every change made on this page (and the dashboard) - who changed what, and when."
+        "Click **Next ▶️** for server activity logs (message edits, channel/role changes)."
     )
-    return discord.Embed(title="⚙️ Bot Settings (5/5) · More Logs", description=description, color=discord.Color.blurple())
+    return discord.Embed(title="⚙️ Bot Settings (5/7) · More Logs", description=description, color=discord.Color.blurple())
+
+
+def _page6_embed(settings: dict) -> discord.Embed:
+    description = (
+        "**Server activity logs**\n"
+        "⚠️ These need **View Audit Log** permission to identify who's responsible.\n\n"
+        f"2️⃣0️⃣ Message edit log: {_mention(settings, 'message_edit_log_channel_id', 'channel')}\n"
+        f"2️⃣1️⃣ Bulk delete log: {_mention(settings, 'message_bulk_delete_log_channel_id', 'channel')}\n"
+        f"2️⃣2️⃣ Channel create/delete/update log: {_mention(settings, 'channel_log_channel_id', 'channel')}\n"
+        f"2️⃣3️⃣ Role create/delete/update log: {_mention(settings, 'role_log_channel_id', 'channel')}"
+    )
+    return discord.Embed(
+        title="⚙️ Bot Settings (6/7) · Server Activity Logs", description=description, color=discord.Color.blurple()
+    )
+
+
+def _page7_embed(settings: dict) -> discord.Embed:
+    description = (
+        "**Nickname/role changes & security**\n\n"
+        f"2️⃣4️⃣ Nickname/role change log: {_mention(settings, 'member_update_log_channel_id', 'channel')}\n"
+        f"2️⃣5️⃣ Trap channel: {_mention(settings, 'trap_channel_id', 'channel')}\n\n"
+        "⚠️ **Trap channel:** anyone who posts in the channel you pick here is instantly banned "
+        "and their recent messages purged server-wide. Admins and the Mod Role are exempt. "
+        "Pick a channel nobody would post in normally (e.g. a hidden or decoy channel)."
+    )
+    return discord.Embed(
+        title="⚙️ Bot Settings (7/7) · Server Activity Logs & Security",
+        description=description,
+        color=discord.Color.blurple(),
+    )
 
 
 class SetupViewPage1(discord.ui.View):
@@ -388,6 +418,106 @@ class SetupViewPage5(discord.ui.View):
     async def back_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         settings = await get_guild_settings(interaction.guild_id)
         await interaction.response.edit_message(embed=_page4_embed(settings), view=SetupViewPage4(settings))
+
+    @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.secondary, row=4)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        settings = await get_guild_settings(interaction.guild_id)
+        await interaction.response.edit_message(embed=_page6_embed(settings), view=SetupViewPage6(settings))
+
+
+class SetupViewPage6(discord.ui.View):
+    def __init__(self, settings: dict):
+        super().__init__(timeout=300)
+        self.message_edit_select.default_values = _default_values(settings, "message_edit_log_channel_id")
+        self.bulk_delete_select.default_values = _default_values(settings, "message_bulk_delete_log_channel_id")
+        self.channel_log_select.default_values = _default_values(settings, "channel_log_channel_id")
+        self.role_log_select.default_values = _default_values(settings, "role_log_channel_id")
+
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        placeholder="2️⃣0️⃣ Message edit log channel",
+        channel_types=[discord.ChannelType.text],
+        row=0,
+    )
+    async def message_edit_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        channel = select.values[0]
+        await _apply_setting(interaction, "message_edit_log_channel_id", channel.id, "Message edit log", channel.mention)
+
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        placeholder="2️⃣1️⃣ Bulk delete log channel",
+        channel_types=[discord.ChannelType.text],
+        row=1,
+    )
+    async def bulk_delete_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        channel = select.values[0]
+        await _apply_setting(
+            interaction, "message_bulk_delete_log_channel_id", channel.id, "Bulk delete log", channel.mention
+        )
+
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        placeholder="2️⃣2️⃣ Channel create/delete/update log",
+        channel_types=[discord.ChannelType.text],
+        row=2,
+    )
+    async def channel_log_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        channel = select.values[0]
+        await _apply_setting(interaction, "channel_log_channel_id", channel.id, "Channel log", channel.mention)
+
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        placeholder="2️⃣3️⃣ Role create/delete/update log",
+        channel_types=[discord.ChannelType.text],
+        row=3,
+    )
+    async def role_log_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        channel = select.values[0]
+        await _apply_setting(interaction, "role_log_channel_id", channel.id, "Role log", channel.mention)
+
+    @discord.ui.button(label="◀️ Back", style=discord.ButtonStyle.secondary, row=4)
+    async def back_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        settings = await get_guild_settings(interaction.guild_id)
+        await interaction.response.edit_message(embed=_page5_embed(settings), view=SetupViewPage5(settings))
+
+    @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.secondary, row=4)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        settings = await get_guild_settings(interaction.guild_id)
+        await interaction.response.edit_message(embed=_page7_embed(settings), view=SetupViewPage7(settings))
+
+
+class SetupViewPage7(discord.ui.View):
+    def __init__(self, settings: dict):
+        super().__init__(timeout=300)
+        self.member_update_select.default_values = _default_values(settings, "member_update_log_channel_id")
+        self.trap_channel_select.default_values = _default_values(settings, "trap_channel_id")
+
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        placeholder="2️⃣4️⃣ Nickname/role change log channel",
+        channel_types=[discord.ChannelType.text],
+        row=0,
+    )
+    async def member_update_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        channel = select.values[0]
+        await _apply_setting(
+            interaction, "member_update_log_channel_id", channel.id, "Nickname/role change log", channel.mention
+        )
+
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        placeholder="2️⃣5️⃣ Trap channel (auto-ban on post)",
+        channel_types=[discord.ChannelType.text],
+        row=1,
+    )
+    async def trap_channel_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        channel = select.values[0]
+        await _apply_setting(interaction, "trap_channel_id", channel.id, "Trap channel", channel.mention)
+
+    @discord.ui.button(label="◀️ Back", style=discord.ButtonStyle.secondary, row=4)
+    async def back_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        settings = await get_guild_settings(interaction.guild_id)
+        await interaction.response.edit_message(embed=_page6_embed(settings), view=SetupViewPage6(settings))
 
 
 class Setup(commands.Cog):

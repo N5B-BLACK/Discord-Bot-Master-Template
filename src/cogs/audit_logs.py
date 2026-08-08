@@ -9,39 +9,25 @@ Note: telling a "natural leave" apart from a "kick" requires checking the Audit 
 (same approach as the voice disconnect log) - the bot needs "View Audit Log" permission.
 """
 
-import asyncio
 import datetime
 
 import discord
 from discord.ext import commands
 
 from utils.embed_helper import build_embed
-from utils.log_helper import send_guild_log
+from utils.log_helper import get_recent_audit_entry, send_guild_log
 
 
 class AuditLogs(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def _get_recent_audit_entry(self, guild: discord.Guild, action, target_id: int, wait: float = 1.5):
-        """Checks the Audit Log for a recent entry (last 10 seconds) matching the target - returns the entry or None."""
-        await asyncio.sleep(wait)
-        try:
-            async for entry in guild.audit_logs(limit=5, action=action):
-                if entry.target and getattr(entry.target, "id", None) == target_id:
-                    time_diff = discord.utils.utcnow() - entry.created_at
-                    if time_diff.total_seconds() < 10:
-                        return entry
-        except discord.Forbidden:
-            pass  # bot lacks the View Audit Log permission
-        return None
-
     # ---------------------------------------------------------
     # Ban / unban
     # ---------------------------------------------------------
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
-        entry = await self._get_recent_audit_entry(guild, discord.AuditLogAction.ban, user.id)
+        entry = await get_recent_audit_entry(guild, discord.AuditLogAction.ban, user.id)
 
         embed = await build_embed(
             guild.id,
@@ -58,7 +44,7 @@ class AuditLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User):
-        entry = await self._get_recent_audit_entry(guild, discord.AuditLogAction.unban, user.id)
+        entry = await get_recent_audit_entry(guild, discord.AuditLogAction.unban, user.id)
 
         embed = await build_embed(
             guild.id,
@@ -95,7 +81,7 @@ class AuditLogs(commands.Cog):
     # ---------------------------------------------------------
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
-        entry = await self._get_recent_audit_entry(member.guild, discord.AuditLogAction.kick, member.id)
+        entry = await get_recent_audit_entry(member.guild, discord.AuditLogAction.kick, member.id)
 
         if entry:
             embed = await build_embed(
@@ -147,7 +133,7 @@ class AuditLogs(commands.Cog):
         if before.timed_out_until == after.timed_out_until:
             return
 
-        entry = await self._get_recent_audit_entry(
+        entry = await get_recent_audit_entry(
             after.guild, discord.AuditLogAction.member_update, after.id
         )
 
