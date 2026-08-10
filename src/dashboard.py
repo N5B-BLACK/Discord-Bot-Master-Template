@@ -42,6 +42,7 @@ from utils.db import (
     update_guild_setting,
 )
 from utils.embed_builder import LIMITS, EmbedValidationError, blank_embed_json, to_discord_embed
+from utils.log_helper import log_setting_change
 from utils.message_templates import TEMPLATE_SLOT_KEYS, TEMPLATE_SLOTS
 
 logger = logging.getLogger("bot")
@@ -60,51 +61,84 @@ MAX_AGE = 60 * 60 * 24 * 7  # 7 days
 # 4th tuple item: whether this field gets an inline color picker (only true log-channel
 # types - not roles, and not welcome/ai-chat which already have full control elsewhere:
 # welcome via Message Templates, ai-chat isn't an embed at all).
+# Same 34 settings as /setup (cogs/setup.py) - kept in sync deliberately, verify both
+# match if a setting is ever added/removed. Split into two pages here for a cleaner
+# dashboard: SETTINGS_GROUPS (roles, welcome, AI, tickets, security) on the "Server
+# Settings" page, and LOG_GROUPS (every log channel, organized by category) on its own
+# dedicated "Logs" page - keeps the 20+ log channels from burying the handful of
+# non-log settings a server only sets once and rarely revisits.
+# 4th tuple item: whether this field gets an inline color picker (log channels only -
+# not roles, and not welcome/ai-chat which already have full control elsewhere:
+# welcome via Message Templates, ai-chat isn't an embed at all).
 SETTINGS_GROUPS = [
     ("General & Moderation", [
         ("mod_role_id", "Mod Role", "role", False),
-        ("warn_log_channel_id", "Warn Log Channel", "channel", True),
         ("welcome_channel_id", "Welcome Channel", "channel", False),
         ("auto_role_id", "Auto-Role (new members)", "role", False),
         ("bot_auto_role_id", "Auto-Role (new bots)", "role", False),
     ]),
-    ("AI & Tickets", [
+    ("AI, Tickets & Security", [
         ("ai_chat_channel_id", "AI Channel (/ask)", "channel", False),
         ("ticket_support_role_id", "Support Role", "role", False),
-        ("ticket_log_channel_id", "Ticket Log Channel", "channel", True),
+        ("trap_channel_id", "Trap Channel (auto-ban on post)", "channel", False),
+    ]),
+]
+
+# Ordered so related log types sit next to each other - this order is also the order
+# they render on the Logs page, top to bottom.
+LOG_GROUPS = [
+    ("Moderation Logs", [
+        ("warn_log_channel_id", "Warn Log", "channel", True),
+        ("ban_unban_log_channel_id", "Ban / Unban Log", "channel", True),
+        ("kicked_log_channel_id", "Kick Log", "channel", True),
+        ("timeout_log_channel_id", "Timeout Log", "channel", True),
+        ("msg_deleted_log_channel_id", "Message Deletion Log", "channel", True),
+        ("message_edit_log_channel_id", "Message Edit Log", "channel", True),
+        ("message_bulk_delete_log_channel_id", "Bulk Delete Log", "channel", True),
     ]),
     ("Voice Logs", [
         ("voice_join_leave_log_channel_id", "Join / Leave Log", "channel", True),
-        ("voice_switch_log_channel_id", "Channel Switch Log", "channel", True),
+        ("voice_switch_log_channel_id", "Switch Log (self)", "channel", True),
+        ("voice_move_log_channel_id", "Moved Log (by a mod)", "channel", True),
         ("voice_disconnect_log_channel_id", "Disconnect Log", "channel", True),
         ("voice_mute_log_channel_id", "Mute / Unmute Log", "channel", True),
         ("voice_deafen_log_channel_id", "Deafen / Undeafen Log", "channel", True),
     ]),
-    ("More Logs", [
-        ("ban_unban_log_channel_id", "Ban / Unban Log", "channel", True),
+    ("Server & Member Logs", [
         ("server_join_leave_log_channel_id", "Server Join / Leave Log", "channel", True),
-        ("msg_deleted_log_channel_id", "Message Deletion Log", "channel", True),
-        ("timeout_log_channel_id", "Timeout Log", "channel", True),
-        ("kicked_log_channel_id", "Kick Log", "channel", True),
-        ("setup_update_log_channel_id", "Settings Update Log", "channel", True),
+        ("nickname_change_log_channel_id", "Nickname Change Log", "channel", True),
+        ("member_role_change_log_channel_id", "Member Role Change Log", "channel", True),
     ]),
-    ("Server Activity Logs", [
-        ("message_edit_log_channel_id", "Message Edit Log", "channel", True),
-        ("message_bulk_delete_log_channel_id", "Bulk Delete Log", "channel", True),
-        ("channel_log_channel_id", "Channel Create/Delete/Update Log", "channel", True),
-        ("role_log_channel_id", "Role Create/Delete/Update Log", "channel", True),
-        ("member_update_log_channel_id", "Nickname/Role Change Log", "channel", True),
+    ("Channel Logs", [
+        ("channel_create_log_channel_id", "Channel Created Log", "channel", True),
+        ("channel_delete_log_channel_id", "Channel Deleted Log", "channel", True),
+        ("channel_update_log_channel_id", "Channel Updated Log", "channel", True),
     ]),
-    ("Security", [
-        ("trap_channel_id", "Trap Channel (auto-ban on post)", "channel", False),
+    ("Role Logs", [
+        ("role_create_log_channel_id", "Role Created Log", "channel", True),
+        ("role_delete_log_channel_id", "Role Deleted Log", "channel", True),
+        ("role_update_log_channel_id", "Role Updated Log", "channel", True),
+    ]),
+    ("Thread Logs", [
+        ("thread_create_log_channel_id", "Thread Created Log", "channel", True),
+        ("thread_delete_log_channel_id", "Thread Deleted Log", "channel", True),
+        ("thread_update_log_channel_id", "Thread Updated Log", "channel", True),
+    ]),
+    ("Tickets & System", [
+        ("ticket_log_channel_id", "Ticket Log Channel", "channel", True),
+        ("setup_update_log_channel_id", "Settings-Update Log", "channel", True),
     ]),
 ]
-VALID_KEYS = {key for _, fields in SETTINGS_GROUPS for key, _, _, _ in fields}
-LOG_COLOR_KEYS = {key for _, fields in SETTINGS_GROUPS for key, _, _, colorable in fields if colorable}
+
+ALL_SETTINGS_GROUPS = SETTINGS_GROUPS + LOG_GROUPS
+VALID_KEYS = {key for _, fields in ALL_SETTINGS_GROUPS for key, _, _, _ in fields}
+LOG_COLOR_KEYS = {key for _, fields in ALL_SETTINGS_GROUPS for key, _, _, colorable in fields if colorable}
+SETTINGS_LABELS = {key: label for _, fields in ALL_SETTINGS_GROUPS for key, label, _, _ in fields}
 
 NAV_ITEMS = [
     ("", "Overview", "overview"),
     ("settings", "Server Settings", "settings"),
+    ("logs", "Logs", "logs"),
     ("branding", "Branding", "branding"),
     ("tickets", "Ticket Panel", "tickets"),
     ("embeds", "Embed Builder", "embeds"),
@@ -897,14 +931,74 @@ async def guild_settings_page(request: web.Request, bot) -> web.Response:
 
     content = f"""
     <div class="eyebrow">Server settings</div>
-    <h1>Roles &amp; log channels</h1>
-    <p class="subtitle">Changes save instantly — identical to running /setup in Discord.</p>
+    <h1>Roles &amp; channels</h1>
+    <p class="subtitle">Changes save instantly — identical to running /setup in Discord. Looking for log channels? See the <a href="/dashboard/{guild.id}/logs" style="color:var(--accent-soft);">Logs</a> page.</p>
     {groups_html}
     <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
     <script>{SETTINGS_JS}</script>
     """
     body = _sidebar_shell(guild, _icon_url(guild), "settings", content)
     return web.Response(text=_page_shell(f"{guild.name} · Settings", SIDEBAR_STYLES + SETTINGS_STYLES, body), content_type="text/html")
+
+
+async def logs_page(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id)
+    if not isinstance(guard, discord.Guild):
+        return guard
+    guild = guard
+
+    settings = await get_guild_settings(guild_id)
+    log_colors = settings.get("log_colors") or {}
+
+    def _anchor_id(name: str) -> str:
+        return "log-" + name.lower().replace(" ", "-").replace("&", "and").replace("/", "")
+
+    quick_nav = " · ".join(
+        f'<a href="#{_anchor_id(name)}" style="color:var(--accent-soft);">{name}</a>' for name, _ in LOG_GROUPS
+    )
+
+    groups_html = ""
+    for group_name, fields in LOG_GROUPS:
+        rows = ""
+        for key, label, kind, colorable in fields:
+            current = settings.get(key)
+            options = _build_options(guild, kind, current)
+            current_color = log_colors.get(key)
+            color_hex = f"#{current_color:06x}" if current_color is not None else "#7c5cff"
+            is_custom = current_color is not None
+            reset_btn = (
+                f'<button type="button" class="log-color-reset" data-color-for="{key}" title="Reset to default color">×</button>'
+                if is_custom else ""
+            )
+            color_picker = (
+                f'<span class="log-color-picker{" is-custom" if is_custom else ""}" data-color-wrap-for="{key}">'
+                f'<input type="color" data-color-for="{key}" value="{color_hex}">'
+                f'{reset_btn}'
+                f'</span>'
+            )
+            rows += f"""
+            <div class="field">
+                <label>{label}</label>
+                <div class="field-right">
+                    {color_picker}
+                    <select data-key="{key}">{options}</select>
+                    <span class="status"></span>
+                </div>
+            </div>
+            """
+        groups_html += f'<div class="group" id="{_anchor_id(group_name)}"><h2>{group_name}</h2>{rows}</div>'
+
+    content = f"""
+    <div class="eyebrow">Logs</div>
+    <h1>Every log channel, in one place</h1>
+    <p class="subtitle">Jump to a category: {quick_nav}</p>
+    {groups_html}
+    <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
+    <script>{SETTINGS_JS}</script>
+    """
+    body = _sidebar_shell(guild, _icon_url(guild), "logs", content)
+    return web.Response(text=_page_shell(f"{guild.name} · Logs", SIDEBAR_STYLES + SETTINGS_STYLES, body), content_type="text/html")
 
 
 async def branding_page(request: web.Request, bot) -> web.Response:
@@ -1693,6 +1787,7 @@ async def save_guild_setting(request: web.Request, bot) -> web.Response:
     access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
     if not isinstance(guard, discord.Guild):
         return guard
+    guild = guard
 
     body = await request.json()
     key = body.get("key")
@@ -1702,6 +1797,16 @@ async def save_guild_setting(request: web.Request, bot) -> web.Response:
 
     parsed_value = int(value) if value else None
     await update_guild_setting(guild_id, key, parsed_value)
+
+    if parsed_value:
+        target = guild.get_channel(parsed_value) or guild.get_role(parsed_value)
+        display_value = target.mention if target else f"`{parsed_value}`"
+    else:
+        display_value = "*Not set*"
+    session_data = _read_session(request)
+    username = session_data.get("user", {}).get("username", "someone")
+    await log_setting_change(guild, SETTINGS_LABELS.get(key, key), display_value, f"{username} (dashboard)")
+
     return web.json_response({"ok": True})
 
 
@@ -1950,6 +2055,7 @@ def setup_dashboard_routes(app: web.Application, bot):
 
     app.router.add_get("/dashboard/{guild_id}", lambda request: overview_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/settings", lambda request: guild_settings_page(request, bot))
+    app.router.add_get("/dashboard/{guild_id}/logs", lambda request: logs_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/branding", lambda request: branding_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/tickets", lambda request: tickets_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/embeds", lambda request: embeds_page(request, bot))

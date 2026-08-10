@@ -1,14 +1,18 @@
 """
-Voice logs - each event type goes to its own channel (configured via /setup page 3):
+Voice logs - each event type goes to its own channel (configured via /setup or the
+dashboard):
 - Join/leave a voice channel
-- Switch between two voice channels
+- Switch between two channels (the member's own doing)
+- Moved between two channels BY a moderator (Discord's "Move To" action) - a distinct
+  log from a self-initiated switch, since it's a moderation action worth tracking
+  separately
 - Member disconnected by an admin (Disconnect)
 - Server mute/unmute
 - Server deafen/undeafen
 
-Note: telling apart a "natural leave" from a "forced disconnect by admin" isn't
-directly available from the voice_state_update event, so we wait a second and check
-the Audit Log for a matching MEMBER_DISCONNECT entry. Requires "View Audit Log" permission.
+Note: telling apart a "natural leave/switch" from an admin-forced one isn't directly
+available from the voice_state_update event, so we wait a moment and check the Audit
+Log for a matching entry. Requires "View Audit Log" permission.
 """
 
 import asyncio
@@ -39,6 +43,25 @@ class VoiceLogs(commands.Cog):
                         return entry.user
         except discord.Forbidden:
             pass  # bot lacks the View Audit Log permission
+        return None
+
+    async def _check_forced_move(self, guild: discord.Guild, destination_channel_id: int) -> discord.Member | None:
+        """Checks the Audit Log for a recent 'Move Members' action targeting this
+        destination channel - returns the moderator who moved them if found, otherwise
+        None. Discord's member_move audit entries aren't per-member (a single action
+        can move several people at once), so this matches on destination channel +
+        recency rather than a specific target - a reasonable approximation, same
+        tradeoff every bot with this feature makes."""
+        await asyncio.sleep(1.5)
+        try:
+            async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.member_move):
+                entry_channel = getattr(entry.extra, "channel", None)
+                if entry_channel and entry_channel.id == destination_channel_id:
+                    time_diff = discord.utils.utcnow() - entry.created_at
+                    if time_diff.total_seconds() < 10:
+                        return entry.user
+        except discord.Forbidden:
+            pass
         return None
 
     @commands.Cog.listener()
@@ -78,20 +101,33 @@ class VoiceLogs(commands.Cog):
                 embed.add_field(name="Channel", value=before.channel.mention, inline=True)
                 await send_guild_log(member.guild, "voice_join_leave_log_channel_id", embed)
 
-        # 3) switched between two channels
+        # 3) switched between two channels - could be the member's own doing, or a
+        # moderator moving them (Discord's "Move To" action) - these get logged separately
         elif (
             before.channel is not None
             and after.channel is not None
             and before.channel.id != after.channel.id
         ):
-            embed = await build_embed(
-                guild_id, title="🔀 Switched voice channel", color=discord.Color.blurple().value
-            )
-            embed.timestamp = datetime.datetime.utcnow()
-            embed.add_field(name="Member", value=member.mention, inline=True)
-            embed.add_field(name="From", value=before.channel.mention, inline=True)
-            embed.add_field(name="To", value=after.channel.mention, inline=True)
-            await send_guild_log(member.guild, "voice_switch_log_channel_id", embed)
+            moved_by = await self._check_forced_move(member.guild, after.channel.id)
+            if moved_by:
+                embed = await build_embed(
+                    guild_id, title="➡️ Moved to another voice channel", color=discord.Color.dark_orange().value
+                )
+                embed.timestamp = datetime.datetime.utcnow()
+                embed.add_field(name="Member", value=member.mention, inline=True)
+                embed.add_field(name="By", value=moved_by.mention, inline=True)
+                embed.add_field(name="From", value=before.channel.mention, inline=True)
+                embed.add_field(name="To", value=after.channel.mention, inline=True)
+                await send_guild_log(member.guild, "voice_move_log_channel_id", embed)
+            else:
+                embed = await build_embed(
+                    guild_id, title="🔀 Switched voice channel", color=discord.Color.blurple().value
+                )
+                embed.timestamp = datetime.datetime.utcnow()
+                embed.add_field(name="Member", value=member.mention, inline=True)
+                embed.add_field(name="From", value=before.channel.mention, inline=True)
+                embed.add_field(name="To", value=after.channel.mention, inline=True)
+                await send_guild_log(member.guild, "voice_switch_log_channel_id", embed)
 
         # 4) server mute/unmute - not self-mute
         if before.mute != after.mute:

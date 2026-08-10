@@ -1,18 +1,21 @@
 """
 Extended server logs - the ProBot-style event types that go beyond the original set
-(ban/unban, join/leave, message deletion, timeout, voice). Each type has its own
-configurable log channel (dashboard Server Settings, or /setup), same pattern as
-every other log in this bot:
+(ban/unban, join/leave, message deletion, timeout, voice). Every event type has its
+OWN dedicated log channel - deliberately not grouped (e.g. "channel created" and
+"channel deleted" are two separate settings, not one "channel log") so a server can
+route different event types to different channels, or mute the noisy ones without
+losing the important ones.
 
 - Message edited
 - Messages bulk-deleted (a purge, not a single delete - message deletion cog handles
   single deletes; this handles the "someone cleared 50 messages" case)
-- Channel created / deleted / updated (name, topic, slowmode) - one combined log
-- Role created / deleted / updated (name, color, permissions) - one combined log
-- Member updated - nickname change or role add/remove - one combined log
+- Channel created / deleted / updated (name, topic, slowmode) - 3 separate logs
+- Role created / deleted / updated (name, color, permissions) - 3 separate logs
+- Nickname changed / member roles changed - 2 separate logs
+- Thread created / deleted / updated (archived, locked, renamed) - 3 separate logs
 
-Where Discord's event doesn't include who made the change (channel/role/nickname
-edits don't come with an actor), the Audit Log is checked via the shared
+Where Discord's event doesn't include who made the change (channel/role/nickname/
+thread edits don't come with an actor), the Audit Log is checked via the shared
 get_recent_audit_entry() helper - same approach as ban/kick/timeout logging.
 """
 
@@ -84,7 +87,7 @@ class ServerLogs(commands.Cog):
         await send_guild_log(guild, "message_bulk_delete_log_channel_id", embed)
 
     # -----------------------------------------------------------------
-    # Channels: create / delete / update
+    # Channels: create / delete / update - 3 separate logs
     # -----------------------------------------------------------------
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
@@ -98,7 +101,7 @@ class ServerLogs(commands.Cog):
         embed.add_field(name="Channel", value=f"{channel.mention} ({channel.type.name})", inline=True)
         if entry:
             embed.add_field(name="By", value=entry.user.mention, inline=True)
-        await send_guild_log(channel.guild, "channel_log_channel_id", embed)
+        await send_guild_log(channel.guild, "channel_create_log_channel_id", embed)
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
@@ -112,7 +115,7 @@ class ServerLogs(commands.Cog):
         embed.add_field(name="Channel", value=f"#{channel.name} ({channel.type.name})", inline=True)
         if entry:
             embed.add_field(name="By", value=entry.user.mention, inline=True)
-        await send_guild_log(channel.guild, "channel_log_channel_id", embed)
+        await send_guild_log(channel.guild, "channel_delete_log_channel_id", embed)
 
     @commands.Cog.listener()
     async def on_guild_channel_update(self, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel):
@@ -141,10 +144,10 @@ class ServerLogs(commands.Cog):
         if entry:
             embed.add_field(name="By", value=entry.user.mention, inline=True)
         embed.add_field(name="Changes", value="\n".join(changes), inline=False)
-        await send_guild_log(after.guild, "channel_log_channel_id", embed)
+        await send_guild_log(after.guild, "channel_update_log_channel_id", embed)
 
     # -----------------------------------------------------------------
-    # Roles: create / delete / update
+    # Roles: create / delete / update - 3 separate logs
     # -----------------------------------------------------------------
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role):
@@ -158,7 +161,7 @@ class ServerLogs(commands.Cog):
         embed.add_field(name="Role", value=role.mention, inline=True)
         if entry:
             embed.add_field(name="By", value=entry.user.mention, inline=True)
-        await send_guild_log(role.guild, "role_log_channel_id", embed)
+        await send_guild_log(role.guild, "role_create_log_channel_id", embed)
 
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
@@ -172,7 +175,7 @@ class ServerLogs(commands.Cog):
         embed.add_field(name="Role", value=f"@{role.name}", inline=True)
         if entry:
             embed.add_field(name="By", value=entry.user.mention, inline=True)
-        await send_guild_log(role.guild, "role_log_channel_id", embed)
+        await send_guild_log(role.guild, "role_delete_log_channel_id", embed)
 
     @commands.Cog.listener()
     async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
@@ -199,10 +202,10 @@ class ServerLogs(commands.Cog):
         if entry:
             embed.add_field(name="By", value=entry.user.mention, inline=True)
         embed.add_field(name="Changes", value="\n".join(changes), inline=False)
-        await send_guild_log(after.guild, "role_log_channel_id", embed)
+        await send_guild_log(after.guild, "role_update_log_channel_id", embed)
 
     # -----------------------------------------------------------------
-    # Member updated: nickname or roles changed
+    # Member updated: nickname or roles changed - 2 separate logs
     # (timeout changes are handled separately in audit_logs.py - different log channel)
     # -----------------------------------------------------------------
     @commands.Cog.listener()
@@ -220,7 +223,7 @@ class ServerLogs(commands.Cog):
             embed.add_field(name="After", value=after.nick or "*(none)*", inline=True)
             if entry:
                 embed.add_field(name="By", value=entry.user.mention, inline=True)
-            await send_guild_log(after.guild, "member_update_log_channel_id", embed)
+            await send_guild_log(after.guild, "nickname_change_log_channel_id", embed)
 
         before_roles = set(before.roles)
         after_roles = set(after.roles)
@@ -241,7 +244,69 @@ class ServerLogs(commands.Cog):
                 embed.add_field(name="Removed", value=", ".join(r.mention for r in removed), inline=False)
             if entry:
                 embed.add_field(name="By", value=entry.user.mention, inline=True)
-            await send_guild_log(after.guild, "member_update_log_channel_id", embed)
+            await send_guild_log(after.guild, "member_role_change_log_channel_id", embed)
+
+    # -----------------------------------------------------------------
+    # Threads: create / delete / update - 3 separate logs
+    # -----------------------------------------------------------------
+    @commands.Cog.listener()
+    async def on_thread_create(self, thread: discord.Thread):
+        entry = await get_recent_audit_entry(thread.guild, discord.AuditLogAction.thread_create, thread.id)
+        embed = await build_embed(
+            thread.guild.id,
+            title="🧵 Thread created",
+            color=discord.Color.green().value,
+            timestamp=datetime.datetime.utcnow(),
+        )
+        embed.add_field(name="Thread", value=thread.mention, inline=True)
+        if thread.parent:
+            embed.add_field(name="In", value=thread.parent.mention, inline=True)
+        if entry:
+            embed.add_field(name="By", value=entry.user.mention, inline=True)
+        elif thread.owner:
+            embed.add_field(name="By", value=thread.owner.mention, inline=True)
+        await send_guild_log(thread.guild, "thread_create_log_channel_id", embed)
+
+    @commands.Cog.listener()
+    async def on_thread_delete(self, thread: discord.Thread):
+        entry = await get_recent_audit_entry(thread.guild, discord.AuditLogAction.thread_delete, thread.id)
+        embed = await build_embed(
+            thread.guild.id,
+            title="🧵 Thread deleted",
+            color=discord.Color.dark_red().value,
+            timestamp=datetime.datetime.utcnow(),
+        )
+        embed.add_field(name="Thread", value=f"#{thread.name}", inline=True)
+        if thread.parent:
+            embed.add_field(name="In", value=thread.parent.mention, inline=True)
+        if entry:
+            embed.add_field(name="By", value=entry.user.mention, inline=True)
+        await send_guild_log(thread.guild, "thread_delete_log_channel_id", embed)
+
+    @commands.Cog.listener()
+    async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
+        changes = []
+        if before.name != after.name:
+            changes.append(f"**Name:** {before.name} → {after.name}")
+        if before.archived != after.archived:
+            changes.append(f"**Archived:** {before.archived} → {after.archived}")
+        if before.locked != after.locked:
+            changes.append(f"**Locked:** {before.locked} → {after.locked}")
+        if not changes:
+            return
+
+        entry = await get_recent_audit_entry(after.guild, discord.AuditLogAction.thread_update, after.id)
+        embed = await build_embed(
+            after.guild.id,
+            title="🧵 Thread updated",
+            color=discord.Color.blurple().value,
+            timestamp=datetime.datetime.utcnow(),
+        )
+        embed.add_field(name="Thread", value=after.mention, inline=True)
+        if entry:
+            embed.add_field(name="By", value=entry.user.mention, inline=True)
+        embed.add_field(name="Changes", value="\n".join(changes), inline=False)
+        await send_guild_log(after.guild, "thread_update_log_channel_id", embed)
 
 
 async def setup(bot: commands.Bot):

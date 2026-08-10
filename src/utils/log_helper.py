@@ -46,3 +46,24 @@ async def get_recent_audit_entry(guild: discord.Guild, action, target_id: int, w
     except discord.Forbidden:
         pass  # bot lacks the View Audit Log permission
     return None
+
+
+async def log_setting_change(guild: discord.Guild, label: str, new_value: str, changed_by: str) -> None:
+    """
+    Logs a settings change to the settings-update log channel - shared by both /setup
+    (cogs/setup.py) and the dashboard (dashboard.py's save handlers), so a change made
+    either way is recorded identically. changed_by is a display string (e.g. a member
+    mention for /setup, or "username (dashboard)" for web changes, since a dashboard
+    edit doesn't have a Discord mention to show).
+    """
+    import datetime
+
+    embed = discord.Embed(
+        title="⚙️ Setting updated",
+        color=discord.Color.blurple(),
+        timestamp=datetime.datetime.utcnow(),
+    )
+    embed.add_field(name="Setting", value=label, inline=True)
+    embed.add_field(name="New value", value=new_value, inline=True)
+    embed.add_field(name="By", value=changed_by, inline=True)
+    await send_guild_log(guild, "setup_update_log_channel_id", embed)
