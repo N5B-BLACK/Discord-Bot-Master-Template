@@ -7,6 +7,7 @@ import motor.motor_asyncio
 from pymongo import ReturnDocument
 
 import config
+from utils.module_registry import default_enabled_modules
 
 _client = motor.motor_asyncio.AsyncIOMotorClient(config.MONGODB_URI)
 _db = _client["discord_bot"]
@@ -68,6 +69,10 @@ DEFAULT_SETTINGS = {
     "ticket_panel_embed_template": None,
     "ticket_open_embed_template": None,
     "auto_divider": {"enabled": False, "image_url": None, "channel_ids": []},
+    # Phase 0 addition (Module Registry) - which whole feature modules are on/off
+    # per guild. Seeded from utils/module_registry.py so adding a new planned
+    # module there automatically appears here with its default state.
+    "enabled_modules": default_enabled_modules(),
 }
 
 
@@ -108,6 +113,16 @@ async def set_log_color(guild_id: int, setting_key: str, color_int) -> None:
             {"$set": {f"log_colors.{setting_key}": color_int, "guild_id": guild_id}},
             upsert=True,
         )
+
+
+async def set_module_enabled(guild_id: int, module_key: str, enabled: bool) -> None:
+    """Toggles a whole feature module on/off for a guild (Module Registry, Phase 0).
+    Does not touch the module's individual settings - just whether it's active."""
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$set": {f"enabled_modules.{module_key}": enabled, "guild_id": guild_id}},
+        upsert=True,
+    )
 
 
 async def create_ticket(guild_id: int, thread_id: int, opener_id: int) -> None:
