@@ -54,6 +54,7 @@ COGS = [
     "cogs.server_logs",
     "cogs.trap_channel",
     "cogs.auto_divider",
+    "cogs.security",
 ]
 
 

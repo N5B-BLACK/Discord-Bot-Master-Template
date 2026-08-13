@@ -69,6 +69,36 @@ DEFAULT_SETTINGS = {
     "ticket_panel_embed_template": None,
     "ticket_open_embed_template": None,
     "auto_divider": {"enabled": False, "image_url": None, "channel_ids": []},
+    # Phase 1 (Security Suite) - each sub-system is independently toggleable.
+    # anti_nuke tracks destructive actions (channel/role delete) per actor via the
+    # audit log; anti_spam tracks message rate per member; anti_link/word_filter
+    # scan message content. All four log to `log_channel_id` if set, otherwise to
+    # `warn_log_channel_id` as a fallback so security alerts are never silently lost.
+    "security": {
+        "log_channel_id": None,
+        "whitelist_user_ids": [],  # exempt from anti-nuke punishment (e.g. co-owners, other bots)
+        "anti_nuke": {
+            "enabled": False,
+            "action_threshold": 3,      # destructive actions...
+            "window_seconds": 10,       # ...within this many seconds triggers punishment
+            "punishment": "strip_roles",  # "strip_roles" or "ban"
+        },
+        "anti_spam": {
+            "enabled": False,
+            "message_threshold": 6,     # messages...
+            "window_seconds": 7,        # ...within this many seconds triggers a timeout
+            "timeout_seconds": 300,
+        },
+        "anti_link": {
+            "enabled": False,
+            "whitelist_domains": [],
+            "whitelist_channel_ids": [],
+        },
+        "word_filter": {
+            "enabled": False,
+            "banned_words": [],
+        },
+    },
     # Phase 0 addition (Module Registry) - which whole feature modules are on/off
     # per guild. Seeded from utils/module_registry.py so adding a new planned
     # module there automatically appears here with its default state.
@@ -260,4 +290,80 @@ async def remove_auto_divider_channel(guild_id: int, channel_id: int) -> None:
     await _guild_settings.update_one(
         {"guild_id": guild_id},
         {"$pull": {"auto_divider.channel_ids": channel_id}},
+    )
+
+
+# ---------------------------------------------------------
+# Security Suite (Phase 1) - anti-nuke / anti-spam / anti-link / word filter.
+# Same nested-doc-with-dot-notation pattern as auto_divider above: $set only
+# touches the specific field, so concurrent updates to different sub-settings
+# (e.g. dashboard changing the threshold while /security changes the log
+# channel) never clobber each other.
+# ---------------------------------------------------------
+async def set_security_setting(guild_id: int, dotted_key: str, value) -> None:
+    """Generic setter for any nested security.* field, e.g. 'anti_nuke.enabled'."""
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$set": {f"security.{dotted_key}": value, "guild_id": guild_id}},
+        upsert=True,
+    )
+
+
+async def add_security_whitelist_user(guild_id: int, user_id: int) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$addToSet": {"security.whitelist_user_ids": user_id}, "$set": {"guild_id": guild_id}},
+        upsert=True,
+    )
+
+
+async def remove_security_whitelist_user(guild_id: int, user_id: int) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$pull": {"security.whitelist_user_ids": user_id}},
+    )
+
+
+async def add_banned_word(guild_id: int, word: str) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$addToSet": {"security.word_filter.banned_words": word.lower()}, "$set": {"guild_id": guild_id}},
+        upsert=True,
+    )
+
+
+async def remove_banned_word(guild_id: int, word: str) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$pull": {"security.word_filter.banned_words": word.lower()}},
+    )
+
+
+async def add_link_whitelist_domain(guild_id: int, domain: str) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$addToSet": {"security.anti_link.whitelist_domains": domain.lower()}, "$set": {"guild_id": guild_id}},
+        upsert=True,
+    )
+
+
+async def remove_link_whitelist_domain(guild_id: int, domain: str) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$pull": {"security.anti_link.whitelist_domains": domain.lower()}},
+    )
+
+
+async def add_link_whitelist_channel(guild_id: int, channel_id: int) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$addToSet": {"security.anti_link.whitelist_channel_ids": channel_id}, "$set": {"guild_id": guild_id}},
+        upsert=True,
+    )
+
+
+async def remove_link_whitelist_channel(guild_id: int, channel_id: int) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$pull": {"security.anti_link.whitelist_channel_ids": channel_id}},
     )

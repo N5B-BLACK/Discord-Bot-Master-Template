@@ -22,7 +22,7 @@ subscription-plan decision is made, filtering enabled modules by the guild's pla
 becomes a one-line change here instead of a redesign.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -53,12 +53,12 @@ MODULES: list[Module] = [
     Module("auto_divider", "الفاصل التلقائي", "core", "صورة فاصلة تلقائية بعد كل رسالة", False, True),
     Module("embed_builder", "بناء Embeds", "core", "محرر embeds مخصص بالكامل", True, True),
 
-    # --- Phase 1: Security suite (planned) ---
-    Module("anti_nuke", "الحماية من التخريب", "security", "كشف حذف قنوات/رولات جماعي وتجميد الصلاحيات", False, False),
-    Module("anti_spam", "منع السبام", "security", "كشف وإيقاف السبام تلقائياً", False, False),
-    Module("anti_link", "منع الروابط", "security", "حظر روابط غير مسموحة مع استثناءات", False, False),
+    # --- Phase 1: Security suite ---
+    Module("anti_nuke", "الحماية من التخريب", "security", "كشف حذف قنوات/رولات جماعي وتجميد الصلاحيات", False, True),
+    Module("anti_spam", "منع السبام", "security", "كشف وإيقاف السبام تلقائياً", False, True),
+    Module("anti_link", "منع الروابط", "security", "حظر روابط غير مسموحة مع استثناءات", False, True),
+    Module("word_filter", "فلتر الكلمات", "security", "قائمة كلمات محظورة قابلة للتخصيص", False, True),
     Module("anti_webhook", "حماية الويبهوكس", "security", "منع إنشاء ويبهوكس غير مصرح", False, False),
-    Module("word_filter", "فلتر الكلمات", "security", "قائمة كلمات محظورة قابلة للتخصيص", False, False),
     Module("raid_mode", "وضع الهجوم", "security", "قفل مؤقت للسيرفر عند هجوم أعضاء وهميين", False, False),
     Module("server_backup", "نسخ احتياطي", "security", "نسخ/استعادة إعدادات السيرفر", False, False),
 
