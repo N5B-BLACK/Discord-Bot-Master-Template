@@ -579,6 +579,196 @@ async def divider_page(request: web.Request, bot) -> web.Response:
     )
 
 
+async def security_page(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id)
+    if not isinstance(guard, discord.Guild):
+        return guard
+    guild = guard
+
+    settings = await get_guild_settings(guild_id)
+    security = settings.get("security", {})
+    anti_nuke = security.get("anti_nuke", {})
+    anti_spam = security.get("anti_spam", {})
+    anti_link = security.get("anti_link", {})
+    word_filter = security.get("word_filter", {})
+
+    log_channel_options = _build_options(guild, "channel", security.get("log_channel_id"))
+    link_channel_options = _build_options(guild, "channel", None)
+
+    def _chip_rows(values, remove_attr, label_fn=str):
+        if not values:
+            return '<p class="group-hint">None added yet.</p>'
+        rows = ""
+        for v in values:
+            rows += f"""
+            <div class="field">
+                <label>{label_fn(v)}</label>
+                <div class="field-right">
+                    <button class="btn danger" data-{remove_attr}="{v}">Remove</button>
+                </div>
+            </div>
+            """
+        return rows
+
+    whitelist_users = security.get("whitelist_user_ids", [])
+    whitelist_rows = _chip_rows(
+        whitelist_users, "remove-whitelist-user",
+        lambda uid: (lambda m: f"{m} ({uid})" if m else f"Unknown user ({uid})")(guild.get_member(uid)),
+    )
+    banned_words_rows = _chip_rows(word_filter.get("banned_words", []), "remove-banned-word")
+    link_domain_rows = _chip_rows(anti_link.get("whitelist_domains", []), "remove-link-domain")
+    link_channel_rows = _chip_rows(
+        anti_link.get("whitelist_channel_ids", []), "remove-link-channel",
+        lambda cid: (lambda c: f"#{c.name}" if c else f"Unknown channel ({cid})")(guild.get_channel(cid)),
+    )
+
+    def _toggle_row(system_key, nice_name, enabled):
+        return f"""
+        <div class="action-row">
+            <label style="display:flex;align-items:center;gap:10px;font-size:14px;">
+                <input type="checkbox" class="sec-toggle" data-system="{system_key}" {"checked" if enabled else ""} style="width:18px;height:18px;">
+                {nice_name}
+            </label>
+            <span class="status" id="{system_key}-toggle-status"></span>
+        </div>
+        """
+
+    content = f"""
+    <div class="eyebrow">Security</div>
+    <h1>Protect this server automatically</h1>
+    <p class="subtitle">
+        Every sub-system below is off until you turn it on. Admins (Administrator permission) are always
+        exempt from message-based checks (anti-spam / anti-link / word filter).
+    </p>
+
+    <div class="group">
+        <h2>Alerts</h2>
+        <div class="field">
+            <label>Log Channel</label>
+            <div class="field-right">
+                <select id="sec-log-channel">{log_channel_options}</select>
+            </div>
+        </div>
+        <div class="action-row">
+            <span></span>
+            <div class="field-right">
+                <button class="btn" id="save-log-channel-btn">Save</button>
+                <span class="status" id="log-channel-status"></span>
+            </div>
+        </div>
+        <p class="group-hint">Falls back to the Warn Log channel if not set.</p>
+    </div>
+
+    <div class="group">
+        <h2>Anti-Nuke</h2>
+        {_toggle_row("anti_nuke", "Enabled", anti_nuke.get("enabled"))}
+        <div class="field">
+            <label>Action threshold</label>
+            <div class="field-right"><input type="number" id="nuke-threshold" min="1" value="{anti_nuke.get('action_threshold', 3)}" style="width:80px;"></div>
+        </div>
+        <div class="field">
+            <label>Window (seconds)</label>
+            <div class="field-right"><input type="number" id="nuke-window" min="1" value="{anti_nuke.get('window_seconds', 10)}" style="width:80px;"></div>
+        </div>
+        <div class="field">
+            <label>Punishment</label>
+            <div class="field-right">
+                <select id="nuke-punishment">
+                    <option value="strip_roles" {"selected" if anti_nuke.get("punishment", "strip_roles") == "strip_roles" else ""}>Strip all roles</option>
+                    <option value="ban" {"selected" if anti_nuke.get("punishment") == "ban" else ""}>Ban</option>
+                </select>
+            </div>
+        </div>
+        <div class="action-row">
+            <span></span>
+            <div class="field-right">
+                <button class="btn" id="save-nuke-btn">Save</button>
+                <span class="status" id="nuke-status"></span>
+            </div>
+        </div>
+        <h3 style="margin-top:16px;font-size:14px;">Exempt users (immune to anti-nuke actions)</h3>
+        <div id="whitelist-user-list">{whitelist_rows}</div>
+        <div class="action-row">
+            <input type="text" id="add-whitelist-user" placeholder="User ID" style="min-width:200px;">
+            <div class="field-right">
+                <button class="btn" id="add-whitelist-user-btn">Add</button>
+                <span class="status" id="whitelist-user-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="group">
+        <h2>Anti-Spam</h2>
+        {_toggle_row("anti_spam", "Enabled", anti_spam.get("enabled"))}
+        <div class="field">
+            <label>Message threshold</label>
+            <div class="field-right"><input type="number" id="spam-threshold" min="1" value="{anti_spam.get('message_threshold', 6)}" style="width:80px;"></div>
+        </div>
+        <div class="field">
+            <label>Window (seconds)</label>
+            <div class="field-right"><input type="number" id="spam-window" min="1" value="{anti_spam.get('window_seconds', 7)}" style="width:80px;"></div>
+        </div>
+        <div class="field">
+            <label>Timeout (seconds)</label>
+            <div class="field-right"><input type="number" id="spam-timeout" min="1" value="{anti_spam.get('timeout_seconds', 300)}" style="width:80px;"></div>
+        </div>
+        <div class="action-row">
+            <span></span>
+            <div class="field-right">
+                <button class="btn" id="save-spam-btn">Save</button>
+                <span class="status" id="spam-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="group">
+        <h2>Anti-Link</h2>
+        {_toggle_row("anti_link", "Enabled", anti_link.get("enabled"))}
+        <h3 style="margin-top:16px;font-size:14px;">Whitelisted domains</h3>
+        <div id="link-domain-list">{link_domain_rows}</div>
+        <div class="action-row">
+            <input type="text" id="add-link-domain" placeholder="e.g. tenor.com" style="min-width:200px;">
+            <div class="field-right">
+                <button class="btn" id="add-link-domain-btn">Add</button>
+                <span class="status" id="link-domain-status"></span>
+            </div>
+        </div>
+        <h3 style="margin-top:16px;font-size:14px;">Whitelisted channels (links always allowed)</h3>
+        <div id="link-channel-list">{link_channel_rows}</div>
+        <div class="action-row">
+            <select id="add-link-channel-select">{link_channel_options}</select>
+            <div class="field-right">
+                <button class="btn" id="add-link-channel-btn">Add</button>
+                <span class="status" id="link-channel-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="group">
+        <h2>Word Filter</h2>
+        {_toggle_row("word_filter", "Enabled", word_filter.get("enabled"))}
+        <h3 style="margin-top:16px;font-size:14px;">Banned words</h3>
+        <div id="banned-word-list">{banned_words_rows}</div>
+        <div class="action-row">
+            <input type="text" id="add-banned-word" placeholder="Word to block" style="min-width:200px;">
+            <div class="field-right">
+                <button class="btn" id="add-banned-word-btn">Add</button>
+                <span class="status" id="banned-word-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
+    <script>{SECURITY_JS}</script>
+    """
+    body = _sidebar_shell(guild, _icon_url(guild), "security", content)
+    return web.Response(
+        text=_page_shell(f"{guild.name} · Security", SIDEBAR_STYLES + SETTINGS_STYLES, body),
+        content_type="text/html",
+    )
+
+
 
 async def embeds_page(request: web.Request, bot) -> web.Response:
     guild_id = int(request.match_info["guild_id"])
@@ -871,6 +1061,113 @@ document.querySelectorAll('[data-remove-channel]').forEach(function (btn) {
         }
     });
 });
+"""
+
+SECURITY_JS = """
+function flashStatus(el, ok) {
+    el.textContent = ok ? 'Saved' : 'Error';
+    el.className = 'status show ' + (ok ? 'ok' : 'err');
+    setTimeout(function () { el.classList.remove('show'); }, 1500);
+}
+
+document.querySelectorAll('.sec-toggle').forEach(function (box) {
+    box.addEventListener('change', async function () {
+        const system = box.dataset.system;
+        const statusEl = document.getElementById(system + '-toggle-status');
+        try {
+            const res = await fetch(API_BASE + '/security/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ system: system, enabled: box.checked }),
+            });
+            flashStatus(statusEl, res.ok);
+        } catch (e) { flashStatus(statusEl, false); }
+    });
+});
+
+document.getElementById('save-log-channel-btn').addEventListener('click', async function () {
+    const channelId = document.getElementById('sec-log-channel').value;
+    const statusEl = document.getElementById('log-channel-status');
+    try {
+        const res = await fetch(API_BASE + '/security/log-channel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel_id: channelId || null }),
+        });
+        flashStatus(statusEl, res.ok);
+    } catch (e) { flashStatus(statusEl, false); }
+});
+
+document.getElementById('save-nuke-btn').addEventListener('click', async function () {
+    const statusEl = document.getElementById('nuke-status');
+    try {
+        const res = await fetch(API_BASE + '/security/anti-nuke', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action_threshold: parseInt(document.getElementById('nuke-threshold').value, 10),
+                window_seconds: parseInt(document.getElementById('nuke-window').value, 10),
+                punishment: document.getElementById('nuke-punishment').value,
+            }),
+        });
+        flashStatus(statusEl, res.ok);
+    } catch (e) { flashStatus(statusEl, false); }
+});
+
+document.getElementById('save-spam-btn').addEventListener('click', async function () {
+    const statusEl = document.getElementById('spam-status');
+    try {
+        const res = await fetch(API_BASE + '/security/anti-spam', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message_threshold: parseInt(document.getElementById('spam-threshold').value, 10),
+                window_seconds: parseInt(document.getElementById('spam-window').value, 10),
+                timeout_seconds: parseInt(document.getElementById('spam-timeout').value, 10),
+            }),
+        });
+        flashStatus(statusEl, res.ok);
+    } catch (e) { flashStatus(statusEl, false); }
+});
+
+function wireAddRemove(addBtnId, inputId, statusId, endpoint, payloadKey, removeAttr) {
+    document.getElementById(addBtnId).addEventListener('click', async function () {
+        const el = document.getElementById(inputId);
+        const value = el.tagName === 'SELECT' ? el.value : el.value.trim();
+        const statusEl = document.getElementById(statusId);
+        if (!value) { flashStatus(statusEl, false); return; }
+        try {
+            const payload = {}; payload[payloadKey] = value;
+            const res = await fetch(API_BASE + endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (!res.ok) throw new Error('failed');
+            location.reload();
+        } catch (e) { flashStatus(statusEl, false); }
+    });
+    document.querySelectorAll('[data-' + removeAttr + ']').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+            const value = btn.getAttribute('data-' + removeAttr);
+            try {
+                const payload = { remove: true }; payload[payloadKey] = value;
+                const res = await fetch(API_BASE + endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!res.ok) throw new Error('failed');
+                location.reload();
+            } catch (e) { btn.textContent = 'Error'; }
+        });
+    });
+}
+
+wireAddRemove('add-whitelist-user-btn', 'add-whitelist-user', 'whitelist-user-status', '/security/whitelist-user', 'user_id', 'remove-whitelist-user');
+wireAddRemove('add-banned-word-btn', 'add-banned-word', 'banned-word-status', '/security/banned-word', 'word', 'remove-banned-word');
+wireAddRemove('add-link-domain-btn', 'add-link-domain', 'link-domain-status', '/security/link-domain', 'domain', 'remove-link-domain');
+wireAddRemove('add-link-channel-btn', 'add-link-channel-select', 'link-channel-status', '/security/link-channel', 'channel_id', 'remove-link-channel');
 """
 
 BRANDING_JS = """

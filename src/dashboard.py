@@ -28,6 +28,7 @@ from dashboard_pages import (
     logout,
     logs_page,
     overview_page,
+    security_page,
     templates_page,
     tickets_page,
 )
@@ -40,11 +41,19 @@ from dashboard_api import (
     embeds_send,
     post_ticket_panel,
     remove_divider_channel_route,
+    save_anti_nuke_config,
+    save_anti_spam_config,
+    save_banned_word,
     save_branding,
     save_divider_enabled,
     save_divider_image,
     save_guild_setting,
+    save_link_whitelist_channel,
+    save_link_whitelist_domain,
     save_log_color,
+    save_security_log_channel,
+    save_security_toggle,
+    save_security_whitelist_user,
     save_template_slot,
 )
 
@@ -57,6 +66,7 @@ def setup_dashboard_routes(app: web.Application, bot):
 
     app.router.add_get("/dashboard/{guild_id}", lambda request: overview_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/settings", lambda request: guild_settings_page(request, bot))
+    app.router.add_get("/dashboard/{guild_id}/security", lambda request: security_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/logs", lambda request: logs_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/branding", lambda request: branding_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/tickets", lambda request: tickets_page(request, bot))
@@ -78,3 +88,12 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_post("/dashboard/{guild_id}/api/divider/image", lambda request: save_divider_image(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/divider/channels", lambda request: add_divider_channel_route(request, bot))
     app.router.add_delete("/dashboard/{guild_id}/api/divider/channels/{channel_id}", lambda request: remove_divider_channel_route(request, bot))
+
+    app.router.add_post("/dashboard/{guild_id}/api/security/toggle", lambda request: save_security_toggle(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/security/log-channel", lambda request: save_security_log_channel(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/security/anti-nuke", lambda request: save_anti_nuke_config(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/security/anti-spam", lambda request: save_anti_spam_config(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/security/whitelist-user", lambda request: save_security_whitelist_user(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/security/banned-word", lambda request: save_banned_word(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/security/link-domain", lambda request: save_link_whitelist_domain(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/security/link-channel", lambda request: save_link_whitelist_channel(request, bot))

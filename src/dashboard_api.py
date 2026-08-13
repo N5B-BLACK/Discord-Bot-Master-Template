@@ -14,14 +14,23 @@ from aiohttp import web
 from dashboard_core import LOG_COLOR_KEYS, SETTINGS_LABELS, VALID_KEYS, _guarded_guild, _read_session
 from utils.db import (
     add_auto_divider_channel,
+    add_banned_word,
+    add_link_whitelist_channel,
+    add_link_whitelist_domain,
+    add_security_whitelist_user,
     delete_embed_draft,
     get_embed_draft,
     list_embed_drafts,
     remove_auto_divider_channel,
+    remove_banned_word,
+    remove_link_whitelist_channel,
+    remove_link_whitelist_domain,
+    remove_security_whitelist_user,
     save_embed_draft,
     set_auto_divider_enabled,
     set_auto_divider_image,
     set_log_color,
+    set_security_setting,
     update_guild_setting,
 )
 from utils.embed_builder import EmbedValidationError, blank_embed_json, to_discord_embed
@@ -296,3 +305,148 @@ async def embeds_send(request: web.Request, bot) -> web.Response:
     return web.json_response({"ok": True})
 
 
+# ---------------------------------------------------------
+# Security Suite (Phase 1) - see cogs/security.py for the enforcement side.
+# ---------------------------------------------------------
+_SECURITY_SYSTEMS = {"anti_nuke", "anti_spam", "anti_link", "word_filter"}
+
+
+async def save_security_toggle(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    system = body.get("system")
+    if system not in _SECURITY_SYSTEMS:
+        return web.json_response({"error": "invalid system"}, status=400)
+    await set_security_setting(guild_id, f"{system}.enabled", bool(body.get("enabled")))
+    return web.json_response({"ok": True})
+
+
+async def save_security_log_channel(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    raw = body.get("channel_id")
+    channel_id = int(raw) if raw else None
+    await set_security_setting(guild_id, "log_channel_id", channel_id)
+    return web.json_response({"ok": True})
+
+
+async def save_anti_nuke_config(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    try:
+        threshold = max(1, int(body.get("action_threshold", 3)))
+        window = max(1, int(body.get("window_seconds", 10)))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "threshold/window must be numbers"}, status=400)
+    punishment = body.get("punishment") if body.get("punishment") in ("strip_roles", "ban") else "strip_roles"
+
+    await set_security_setting(guild_id, "anti_nuke.action_threshold", threshold)
+    await set_security_setting(guild_id, "anti_nuke.window_seconds", window)
+    await set_security_setting(guild_id, "anti_nuke.punishment", punishment)
+    return web.json_response({"ok": True})
+
+
+async def save_anti_spam_config(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    try:
+        threshold = max(1, int(body.get("message_threshold", 6)))
+        window = max(1, int(body.get("window_seconds", 7)))
+        timeout_seconds = max(1, int(body.get("timeout_seconds", 300)))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "threshold/window/timeout must be numbers"}, status=400)
+
+    await set_security_setting(guild_id, "anti_spam.message_threshold", threshold)
+    await set_security_setting(guild_id, "anti_spam.window_seconds", window)
+    await set_security_setting(guild_id, "anti_spam.timeout_seconds", timeout_seconds)
+    return web.json_response({"ok": True})
+
+
+async def save_security_whitelist_user(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    try:
+        user_id = int(body.get("user_id"))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "invalid user id"}, status=400)
+
+    if body.get("remove"):
+        await remove_security_whitelist_user(guild_id, user_id)
+    else:
+        await add_security_whitelist_user(guild_id, user_id)
+    return web.json_response({"ok": True})
+
+
+async def save_banned_word(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    word = (body.get("word") or "").strip()
+    if not word:
+        return web.json_response({"error": "word required"}, status=400)
+
+    if body.get("remove"):
+        await remove_banned_word(guild_id, word)
+    else:
+        await add_banned_word(guild_id, word)
+    return web.json_response({"ok": True})
+
+
+async def save_link_whitelist_domain(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    domain = (body.get("domain") or "").strip().lower().removeprefix("www.")
+    if not domain:
+        return web.json_response({"error": "domain required"}, status=400)
+
+    if body.get("remove"):
+        await remove_link_whitelist_domain(guild_id, domain)
+    else:
+        await add_link_whitelist_domain(guild_id, domain)
+    return web.json_response({"ok": True})
+
+
+async def save_link_whitelist_channel(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    try:
+        channel_id = int(body.get("channel_id"))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "invalid channel"}, status=400)
+
+    if body.get("remove"):
+        await remove_link_whitelist_channel(guild_id, channel_id)
+    else:
+        await add_link_whitelist_channel(guild_id, channel_id)
+    return web.json_response({"ok": True})

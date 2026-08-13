@@ -119,6 +119,7 @@ SETTINGS_LABELS = {key: label for _, fields in ALL_SETTINGS_GROUPS for key, labe
 NAV_ITEMS = [
     ("", "Overview", "overview"),
     ("settings", "Server Settings", "settings"),
+    ("security", "Security", "security"),
     ("logs", "Logs", "logs"),
     ("branding", "Branding", "branding"),
     ("tickets", "Ticket Panel", "tickets"),
