@@ -116,18 +116,28 @@ VALID_KEYS = {key for _, fields in ALL_SETTINGS_GROUPS for key, _, _, _ in field
 LOG_COLOR_KEYS = {key for _, fields in ALL_SETTINGS_GROUPS for key, _, _, colorable in fields if colorable}
 SETTINGS_LABELS = {key: label for _, fields in ALL_SETTINGS_GROUPS for key, label, _, _ in fields}
 
+CATEGORY_COLORS = {
+    "core": "var(--cat-core)",
+    "security": "var(--cat-security)",
+    "engagement": "var(--cat-engagement)",
+    "community": "var(--cat-community)",
+}
+
+# (path, label, key, category) - category drives the sidebar's colored rail,
+# matching utils/module_registry.py's taxonomy so the same categorization
+# shows up consistently everywhere in the product.
 NAV_ITEMS = [
-    ("", "Overview", "overview"),
-    ("settings", "Server Settings", "settings"),
-    ("security", "Security", "security"),
-    ("leveling", "Leveling", "leveling"),
-    ("voice-rooms", "Voice Rooms", "voice-rooms"),
-    ("logs", "Logs", "logs"),
-    ("branding", "Branding", "branding"),
-    ("tickets", "Ticket Panel", "tickets"),
-    ("embeds", "Embed Builder", "embeds"),
-    ("templates", "Message Templates", "templates"),
-    ("divider", "Auto Divider", "divider"),
+    ("", "Overview", "overview", "core"),
+    ("settings", "Server Settings", "settings", "core"),
+    ("security", "Security", "security", "security"),
+    ("leveling", "Leveling", "leveling", "engagement"),
+    ("voice-rooms", "Voice Rooms", "voice-rooms", "community"),
+    ("logs", "Logs", "logs", "core"),
+    ("branding", "Branding", "branding", "core"),
+    ("tickets", "Ticket Panel", "tickets", "core"),
+    ("embeds", "Embed Builder", "embeds", "core"),
+    ("templates", "Message Templates", "templates", "core"),
+    ("divider", "Auto Divider", "divider", "core"),
 ]
 
 
@@ -228,51 +238,86 @@ async def _guarded_guild(request: web.Request, bot, guild_id: int, json_errors: 
 # ---------------------------------------------------------
 BASE_STYLES = """
 :root {
-    --bg: #0b0a0f;
-    --sidebar-bg: #121017;
-    --surface: #17151f;
-    --surface-hover: #1d1a27;
-    --border: #2a2733;
-    --accent: #7c5cff;
-    --accent-glow: rgba(124, 92, 255, 0.35);
-    --accent-soft: #a78bfa;
-    --text: #f2f1f7;
-    --text-muted: #9c98ab;
-    --text-faint: #66627a;
-    --success: #34d399;
-    --danger: #f87171;
-    --radius: 12px;
+    --void: #0A0C10;
+    --panel: #14171D;
+    --panel-hover: #191D25;
+    --panel-raised: #20242D;
+    --hairline: #262B35;
+    --hairline-soft: #1B1F27;
+    --ink: #EDEFF3;
+    --ink-dim: #8A90A0;
+    --ink-faint: #565C6B;
+    --signal: #F0A94E;
+    --signal-ink: #1A1200;
+    --signal-dim: rgba(240, 169, 78, 0.14);
+    --signal-ring: rgba(240, 169, 78, 0.32);
+    --success: #3ECF8E;
+    --danger: #E2635F;
+    --danger-dim: rgba(226, 99, 95, 0.14);
+    --cat-core: #6B7690;
+    --cat-security: #E2635F;
+    --cat-engagement: #9A87F0;
+    --cat-community: #3FBFA6;
+    --radius: 14px;
+    --radius-sm: 9px;
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-body: 'Inter', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+
+    /* Backward-compatible aliases - earlier pages/JS were written against these
+       names; keeping them mapped to the new tokens means every existing template
+       repaints automatically with zero HTML changes required. */
+    --bg: var(--void);
+    --sidebar-bg: var(--void);
+    --surface: var(--panel);
+    --surface-hover: var(--panel-hover);
+    --border: var(--hairline);
+    --accent: var(--signal);
+    --accent-glow: var(--signal-ring);
+    --accent-soft: var(--signal);
+    --text: var(--ink);
+    --text-muted: var(--ink-dim);
+    --text-faint: var(--ink-faint);
 }
 * { box-sizing: border-box; }
 html, body { overflow-x: hidden; }
 body {
     margin: 0;
-    background: var(--bg);
-    background-image: radial-gradient(circle at 100% 0%, rgba(124, 92, 255, 0.06), transparent 45%);
-    color: var(--text);
-    font-family: 'Inter', sans-serif;
+    background: var(--void);
+    background-image:
+        radial-gradient(circle at 8% -6%, rgba(240, 169, 78, 0.07), transparent 40%),
+        radial-gradient(circle at 100% 0%, rgba(154, 135, 240, 0.05), transparent 45%);
+    color: var(--ink);
+    font-family: var(--font-body);
     min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
 }
 a { color: inherit; }
+::selection { background: var(--signal-dim); color: var(--ink); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 10px; }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
 .topbar {
     display: flex;
     align-items: center;
     gap: 14px;
     padding: 18px 32px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--hairline);
     position: sticky;
     top: 0;
-    background: rgba(11, 10, 15, 0.85);
-    backdrop-filter: blur(8px);
+    background: rgba(10, 12, 16, 0.85);
+    backdrop-filter: blur(10px);
     z-index: 10;
 }
 @media (max-width: 480px) {
     .topbar { padding: 14px 16px; }
 }
 .brand {
-    font-family: 'Space Grotesk', sans-serif;
+    font-family: var(--font-display);
     font-weight: 600;
     font-size: 16px;
     letter-spacing: -0.01em;
@@ -282,41 +327,42 @@ a { color: inherit; }
 }
 .brand-dot {
     width: 8px; height: 8px; border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 12px var(--accent-glow);
+    background: var(--signal);
+    box-shadow: 0 0 12px var(--signal-ring);
     flex-shrink: 0;
 }
 .topbar .spacer { margin-left: auto; }
 .link-btn {
-    color: var(--text-muted);
+    color: var(--ink-dim);
     text-decoration: none;
     font-size: 13px;
     font-weight: 500;
     padding: 8px 14px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
     transition: border-color 0.15s, color 0.15s;
     background: none;
     cursor: pointer;
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-body);
 }
-.link-btn:hover { border-color: var(--accent); color: var(--text); }
+.link-btn:hover { border-color: var(--signal); color: var(--ink); }
 .eyebrow {
-    color: var(--accent-soft);
+    color: var(--signal);
     font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.07em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     margin-bottom: 8px;
+    font-family: var(--font-mono);
 }
 h1 {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 26px;
+    font-family: var(--font-display);
+    font-size: 27px;
     font-weight: 700;
     letter-spacing: -0.02em;
     margin: 0 0 6px;
 }
-.subtitle { color: var(--text-muted); font-size: 14px; margin: 0 0 32px; }
+.subtitle { color: var(--ink-dim); font-size: 14px; line-height: 1.6; margin: 0 0 32px; max-width: 640px; }
 """
 
 # Login/servers-list page (no guild selected yet -> no sidebar, just a topbar)
@@ -326,26 +372,26 @@ GUILD_LIST_STYLES = """
 .guild-card {
     display: flex; align-items: center; gap: 16px;
     padding: 14px 18px;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: var(--panel);
+    border: 1px solid var(--hairline);
     border-radius: var(--radius);
     text-decoration: none;
-    color: var(--text);
+    color: var(--ink);
     transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s, background 0.15s;
 }
 .guild-card:hover {
-    background: var(--surface-hover);
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent), 0 8px 24px -8px var(--accent-glow);
+    background: var(--panel-hover);
+    border-color: var(--signal);
+    box-shadow: 0 0 0 1px var(--signal), 0 10px 28px -10px var(--signal-ring);
     transform: translateY(-1px);
 }
-.guild-icon { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; border: 1px solid var(--border); }
+.guild-icon { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; border: 1px solid var(--hairline); }
 .guild-name { font-weight: 500; font-size: 15px; flex: 1; }
-.manage-label { color: var(--accent-soft); font-size: 13px; font-weight: 600; }
+.manage-label { color: var(--signal); font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
 .empty-state {
     padding: 40px 24px; text-align: center;
-    background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius);
-    color: var(--text-muted); font-size: 14px; line-height: 1.6;
+    background: var(--panel); border: 1px dashed var(--hairline); border-radius: var(--radius);
+    color: var(--ink-dim); font-size: 14px; line-height: 1.6;
 }
 @media (max-width: 480px) {
     .container { padding: 28px 16px 60px; }
@@ -353,40 +399,48 @@ GUILD_LIST_STYLES = """
 }
 """
 
-# Sidebar shell used by every guild-scoped page
+# Sidebar shell used by every guild-scoped page. Each nav link carries a small
+# category-colored rail (core/security/engagement/community, matching
+# utils/module_registry.py's taxonomy) - the same functional color-coding used
+# throughout the product, so the sidebar itself teaches the categorization.
 SIDEBAR_STYLES = """
 .app-layout { display: flex; min-height: 100vh; }
 .sidebar {
-    width: 240px; flex-shrink: 0;
-    background: var(--sidebar-bg);
-    border-right: 1px solid var(--border);
+    width: 244px; flex-shrink: 0;
+    background: var(--void);
+    border-right: 1px solid var(--hairline);
     display: flex; flex-direction: column;
     position: sticky; top: 0; height: 100vh;
 }
-.sidebar-header { padding: 20px 18px; border-bottom: 1px solid var(--border); }
+.sidebar-header { padding: 20px 18px; border-bottom: 1px solid var(--hairline); }
 .sidebar-guild { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
-.sidebar-guild img { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border); }
+.sidebar-guild img { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--hairline); }
 .sidebar-guild-name {
     font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; max-width: 160px;
 }
-.sidebar-nav { flex: 1; padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
+.sidebar-nav { flex: 1; padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
 .sidebar-link {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 12px; border-radius: 8px;
-    color: var(--text-muted); text-decoration: none;
+    display: flex; align-items: center; gap: 11px;
+    padding: 9px 12px; border-radius: var(--radius-sm);
+    color: var(--ink-dim); text-decoration: none;
     font-size: 13.5px; font-weight: 500;
     transition: background 0.15s, color 0.15s;
+    border-left: 2px solid transparent;
 }
-.sidebar-link:hover { background: var(--surface-hover); color: var(--text); }
+.sidebar-link:hover { background: var(--panel-hover); color: var(--ink); }
 .sidebar-link.active {
-    background: linear-gradient(90deg, var(--accent-glow), transparent);
-    color: var(--text); font-weight: 600;
-    box-shadow: inset 2px 0 0 var(--accent);
+    background: var(--panel);
+    color: var(--ink); font-weight: 600;
+    border-left: 2px solid var(--rail-color, var(--signal));
 }
-.sidebar-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
-.sidebar-link.active .sidebar-dot { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
-.sidebar-footer { padding: 14px 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.sidebar-dot {
+    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+    background: var(--rail-color, var(--ink-faint));
+    opacity: 0.55;
+}
+.sidebar-link.active .sidebar-dot { opacity: 1; box-shadow: 0 0 8px var(--rail-color, var(--signal)); }
+.sidebar-footer { padding: 14px 10px; border-top: 1px solid var(--hairline); display: flex; flex-direction: column; gap: 2px; }
 .main-area { flex: 1; min-width: 0; }
 .page-container { max-width: 860px; padding: 40px 36px 100px; }
 .page-container.wide { max-width: 1180px; }
@@ -395,20 +449,20 @@ SIDEBAR_STYLES = """
 .mobile-topbar {
     display: none;
     align-items: center; gap: 12px;
-    padding: 14px 16px; border-bottom: 1px solid var(--border);
-    position: sticky; top: 0; background: rgba(11, 10, 15, 0.92); backdrop-filter: blur(8px); z-index: 15;
+    padding: 14px 16px; border-bottom: 1px solid var(--hairline);
+    position: sticky; top: 0; background: rgba(10, 12, 16, 0.92); backdrop-filter: blur(10px); z-index: 15;
 }
 .mobile-topbar-guild { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; overflow: hidden; }
 .mobile-topbar-guild img { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; }
 .mobile-topbar-guild span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hamburger-btn {
     display: none; flex-direction: column; justify-content: center; gap: 4px;
-    width: 34px; height: 34px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; cursor: pointer; flex-shrink: 0; padding: 0;
+    width: 34px; height: 34px; background: var(--panel); border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm); cursor: pointer; flex-shrink: 0; padding: 0;
 }
-.hamburger-btn span { width: 16px; height: 2px; background: var(--text); margin: 0 auto; border-radius: 2px; }
+.hamburger-btn span { width: 16px; height: 2px; background: var(--ink); margin: 0 auto; border-radius: 2px; }
 .sidebar-backdrop {
-    display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 19;
+    display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 19;
 }
 .sidebar-backdrop.show { display: block; }
 
@@ -417,7 +471,7 @@ SIDEBAR_STYLES = """
         position: fixed; top: 0; left: 0; z-index: 20; height: 100vh;
         transform: translateX(-100%);
         transition: transform 0.2s ease-out;
-        box-shadow: 24px 0 48px rgba(0, 0, 0, 0.45);
+        box-shadow: 24px 0 48px rgba(0, 0, 0, 0.5);
     }
     .sidebar.open { transform: translateX(0); }
     .mobile-topbar, .hamburger-btn { display: flex; }
@@ -432,27 +486,27 @@ SIDEBAR_STYLES = """
 
 SETTINGS_STYLES = """
 .group {
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: var(--panel);
+    border: 1px solid var(--hairline);
     border-radius: var(--radius);
     padding: 22px 22px 6px;
     margin-bottom: 18px;
 }
 .group h2 {
-    font-family: 'Space Grotesk', sans-serif;
+    font-family: var(--font-display);
     font-size: 13px;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--accent-soft);
+    letter-spacing: 0.07em;
+    color: var(--ink);
     margin: 0 0 14px;
 }
-.group-hint { color: var(--text-muted); font-size: 13px; margin: -8px 0 14px; }
+.group-hint { color: var(--ink-dim); font-size: 13px; margin: -8px 0 14px; line-height: 1.55; }
 .field {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 0; border-top: 1px solid var(--border); gap: 16px;
+    padding: 13px 0; border-top: 1px solid var(--hairline-soft); gap: 16px;
 }
 .group h2 + .field, .group h2 + .group-hint + .field { border-top: none; }
-.field label { font-size: 14px; color: var(--text); }
+.field label { font-size: 14px; color: var(--ink); }
 .field-right { display: flex; align-items: center; gap: 10px; }
 
 /* Professional dropdown treatment, applied to every <select> site-wide - native
@@ -460,34 +514,73 @@ SETTINGS_STYLES = """
 select {
     appearance: none;
     -webkit-appearance: none;
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='%239c98ab' d='M4 6l4 4 4-4' stroke='%239c98ab' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='%238A90A0' d='M4 6l4 4 4-4' stroke='%238A90A0' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
     background-repeat: no-repeat;
     background-position: right 12px center;
     padding-right: 34px !important;
 }
-.field select, .field input[type="text"], .field input[type="url"] {
-    background-color: var(--bg); color: var(--text);
-    border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px 12px; min-width: 220px; font-size: 13px;
-    font-family: 'Inter', sans-serif; cursor: pointer;
+.field select, .field input[type="text"], .field input[type="url"], .field textarea { min-width: 220px; }
+.field input[type="text"], .field input[type="url"] { cursor: text; }
+.field input[type="number"] { font-family: var(--font-mono); }
+
+/* Base dark styling for every text-like control, applied globally rather than
+   scoped to .field - several pages (Security/Leveling's "add X" rows, Voice
+   Rooms) place inputs directly in .action-row instead of .field, and this way
+   every current and future control is covered without depending on where in
+   the markup it happens to sit. */
+input[type="text"], input[type="url"], input[type="number"], textarea, select {
+    background-color: var(--panel-raised); color: var(--ink);
+    border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+    padding: 8px 12px; font-size: 13px;
+    font-family: var(--font-body);
     transition: border-color 0.15s, box-shadow 0.15s;
 }
-.field input[type="text"], .field input[type="url"] { cursor: text; }
-.field select:hover { border-color: var(--text-faint); }
-.field select:focus, .field input:focus {
-    outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow);
+input[type="number"] { font-family: var(--font-mono); }
+input[type="text"], input[type="url"], textarea { cursor: text; }
+select { cursor: pointer; }
+input[type="text"]:hover, input[type="url"]:hover, input[type="number"]:hover, select:hover, textarea:hover { border-color: var(--ink-faint); }
+input:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--signal); box-shadow: 0 0 0 3px var(--signal-ring);
 }
 .field input[type="color"] {
     width: 44px; height: 36px; padding: 2px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+    background: var(--panel-raised); border: 1px solid var(--hairline); border-radius: var(--radius-sm); cursor: pointer;
 }
+
+/* Every checkbox in the dashboard is an on/off feature toggle - styled as a
+   proper pill switch (not a native checkbox) purely in CSS so no template or
+   JS anywhere needs to change. Inline width/height on the existing markup is
+   overridden intentionally via !important. */
+input[type="checkbox"] {
+    appearance: none; -webkit-appearance: none;
+    width: 40px !important; height: 24px !important;
+    background: var(--panel-raised);
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    position: relative;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s;
+    vertical-align: middle;
+}
+input[type="checkbox"]::before {
+    content: "";
+    position: absolute; top: 2px; left: 2px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--ink-dim);
+    transition: transform 0.18s ease, background 0.15s;
+}
+input[type="checkbox"]:checked { background: var(--signal-dim); border-color: var(--signal); }
+input[type="checkbox"]:checked::before { transform: translateX(16px); background: var(--signal); }
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
 .log-color-picker { position: relative; display: inline-flex; align-items: center; }
 .log-color-picker input[type="color"] {
     width: 30px; height: 30px; padding: 2px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 7px; cursor: pointer;
+    background: var(--panel-raised); border: 1px solid var(--hairline); border-radius: 7px; cursor: pointer;
     opacity: .45; transition: opacity 0.15s, border-color 0.15s;
 }
-.log-color-picker.is-custom input[type="color"] { opacity: 1; border-color: var(--accent-soft); }
+.log-color-picker.is-custom input[type="color"] { opacity: 1; border-color: var(--signal); }
 .log-color-picker input[type="color"]:hover { opacity: 1; }
 .log-color-reset {
     position: absolute; top: -6px; right: -6px;
@@ -495,7 +588,7 @@ select {
     background: var(--danger); color: #1a0f0f; border: none;
     font-size: 10px; line-height: 15px; text-align: center; cursor: pointer; padding: 0;
 }
-.status { font-size: 12px; font-weight: 600; opacity: 0; transition: opacity 0.2s; white-space: nowrap; }
+.status { font-size: 12px; font-weight: 600; opacity: 0; transition: opacity 0.2s; white-space: nowrap; font-family: var(--font-mono); }
 .status.show { opacity: 1; }
 .status.ok { color: var(--success); }
 .status.err { color: var(--danger); }
@@ -504,14 +597,17 @@ select {
     padding: 14px 0; gap: 16px;
 }
 .btn {
-    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    background: var(--signal); color: var(--signal-ink); border: none; border-radius: var(--radius-sm);
     padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
-    font-family: 'Inter', sans-serif; transition: filter 0.15s;
+    font-family: var(--font-body); transition: filter 0.15s, transform 0.1s;
 }
-.btn:hover { filter: brightness(1.1); }
+.btn:hover { filter: brightness(1.08); }
+.btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn.secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
-.btn.danger { background: var(--danger); color: #1a0f0f; }
+.btn.secondary { background: var(--panel-raised); border: 1px solid var(--hairline); color: var(--ink); }
+.btn.secondary:hover { border-color: var(--ink-faint); filter: none; }
+.btn.danger { background: var(--danger-dim); color: var(--danger); border: 1px solid rgba(226, 99, 95, 0.35); }
+.btn.danger:hover { background: var(--danger); color: #1a0f0f; filter: none; }
 
 @media (max-width: 640px) {
     .field { flex-direction: column; align-items: stretch; gap: 8px; padding: 14px 0; }
@@ -527,20 +623,20 @@ select {
 OVERVIEW_STYLES = """
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 28px; }
 .stat-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--panel); border: 1px solid var(--hairline); border-radius: var(--radius);
     padding: 18px 20px;
 }
-.stat-card .stat-value { font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 700; }
-.stat-card .stat-label { color: var(--text-muted); font-size: 12.5px; margin-top: 4px; }
+.stat-card .stat-value { font-family: var(--font-mono); font-size: 26px; font-weight: 600; }
+.stat-card .stat-label { color: var(--ink-dim); font-size: 12.5px; margin-top: 4px; }
 .quick-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
 .quick-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 18px 20px; text-decoration: none; color: var(--text);
-    transition: border-color 0.15s, transform 0.15s;
+    background: var(--panel); border: 1px solid var(--hairline); border-radius: var(--radius);
+    padding: 18px 20px; text-decoration: none; color: var(--ink);
+    transition: border-color 0.15s, transform 0.15s, background 0.15s;
 }
-.quick-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.quick-card:hover { border-color: var(--signal); background: var(--panel-hover); transform: translateY(-1px); }
 .quick-card .quick-title { font-weight: 600; font-size: 14.5px; margin-bottom: 4px; }
-.quick-card .quick-desc { color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
+.quick-card .quick-desc { color: var(--ink-dim); font-size: 12.5px; line-height: 1.5; }
 """
 
 # ---------------------------------------------------------
@@ -628,7 +724,7 @@ def _page_shell(title: str, extra_styles: str, body: str) -> str:
     <title>{title}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
     <style>
         {BASE_STYLES}
         {extra_styles}
@@ -643,10 +739,11 @@ def _page_shell(title: str, extra_styles: str, body: str) -> str:
 def _sidebar_shell(guild: discord.Guild, icon_url: str, active: str, content: str, wide: bool = False) -> str:
     """Wraps page content in the standard sidebar layout used by every guild-scoped page."""
     nav_html = ""
-    for path, label, key in NAV_ITEMS:
+    for path, label, key, category in NAV_ITEMS:
         href = f"/dashboard/{guild.id}/{path}" if path else f"/dashboard/{guild.id}"
         cls = "sidebar-link active" if key == active else "sidebar-link"
-        nav_html += f'<a class="{cls}" href="{href}"><span class="sidebar-dot"></span>{label}</a>\n'
+        rail = CATEGORY_COLORS.get(category, "var(--signal)")
+        nav_html += f'<a class="{cls}" style="--rail-color: {rail};" href="{href}"><span class="sidebar-dot"></span>{label}</a>\n'
 
     container_cls = "page-container wide" if wide else "page-container"
     return f"""
