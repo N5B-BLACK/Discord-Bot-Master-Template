@@ -16,6 +16,8 @@ _tickets = _db["tickets"]
 _counters = _db["ticket_counters"]
 _warnings = _db["warnings"]
 _embed_drafts = _db["embed_drafts"]
+_user_levels = _db["user_levels"]
+_reaction_roles = _db["reaction_roles"]
 
 
 async def check_connection() -> bool:
@@ -110,6 +112,19 @@ DEFAULT_SETTINGS = {
             "min_account_age_hours": 24,  # kick_new_accounts mode: only kicks accounts younger than this
             "lockdown_duration_minutes": 15,  # lockdown mode: auto-reverts verification level after this long
         },
+    },
+    # Phase 2 (Engagement) - leveling. Per-user XP itself lives in its own
+    # `user_levels` collection (see below), not here - this block is just the
+    # per-guild *configuration* of the system.
+    "leveling": {
+        "enabled": False,
+        "xp_min": 15,             # XP awarded per eligible message is random between...
+        "xp_max": 25,             # ...these two values (keeps the curve from feeling robotic)
+        "cooldown_seconds": 60,   # a member can only earn XP once per this many seconds
+        "announce_channel_id": None,  # None = announce in the channel the level-up happened in
+        "announce_message": "🎉 {member_mention} leveled up to **level {level}**!",
+        "level_roles": {},        # {"5": role_id, "10": role_id, ...} - awarded automatically on reaching that level
+        "ignored_channel_ids": [],
     },
     # Phase 0 addition (Module Registry) - which whole feature modules are on/off
     # per guild. Seeded from utils/module_registry.py so adding a new planned
@@ -379,3 +394,100 @@ async def remove_link_whitelist_channel(guild_id: int, channel_id: int) -> None:
         {"guild_id": guild_id},
         {"$pull": {"security.anti_link.whitelist_channel_ids": channel_id}},
     )
+
+
+# ---------------------------------------------------------
+# Leveling (Phase 2) - per-user XP/level, kept in its own collection since it's
+# one document per (guild, member) rather than one per guild like everything
+# above. Level itself is *derived* from xp (see utils/leveling_math.py) and
+# also cached on the document so leaderboard sorts/queries don't need to
+# recompute it for every row.
+# ---------------------------------------------------------
+async def add_xp(guild_id: int, member_id: int, amount: int, new_level: int) -> dict:
+    """Adds XP and updates the cached level, returns the updated document."""
+    doc = await _user_levels.find_one_and_update(
+        {"guild_id": guild_id, "member_id": member_id},
+        {"$inc": {"xp": amount}, "$set": {"level": new_level}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    return doc
+
+
+async def get_user_level(guild_id: int, member_id: int) -> dict:
+    doc = await _user_levels.find_one({"guild_id": guild_id, "member_id": member_id})
+    return doc or {"guild_id": guild_id, "member_id": member_id, "xp": 0, "level": 0}
+
+
+async def get_leaderboard(guild_id: int, limit: int = 10) -> list:
+    cursor = _user_levels.find({"guild_id": guild_id}).sort("xp", -1).limit(limit)
+    return await cursor.to_list(length=limit)
+
+
+async def get_rank_position(guild_id: int, member_id: int, member_xp: int) -> int:
+    """1-indexed rank: how many members in this guild have strictly more XP, + 1."""
+    higher_count = await _user_levels.count_documents({"guild_id": guild_id, "xp": {"$gt": member_xp}})
+    return higher_count + 1
+
+
+async def set_leveling_setting(guild_id: int, dotted_key: str, value) -> None:
+    """Generic setter for nested leveling.* fields, e.g. 'xp_min'."""
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$set": {f"leveling.{dotted_key}": value, "guild_id": guild_id}},
+        upsert=True,
+    )
+
+
+async def set_level_role(guild_id: int, level: int, role_id: int | None) -> None:
+    """role_id=None removes the reward for that level."""
+    if role_id is None:
+        await _guild_settings.update_one(
+            {"guild_id": guild_id},
+            {"$unset": {f"leveling.level_roles.{level}": ""}},
+        )
+    else:
+        await _guild_settings.update_one(
+            {"guild_id": guild_id},
+            {"$set": {f"leveling.level_roles.{level}": role_id, "guild_id": guild_id}},
+            upsert=True,
+        )
+
+
+# ---------------------------------------------------------
+# Reaction Roles (Phase 2) - one document per reaction-role message, keyed by
+# message_id so the listener can do a single indexed lookup per reaction event.
+# ---------------------------------------------------------
+async def create_reaction_role_message(guild_id: int, channel_id: int, message_id: int) -> None:
+    await _reaction_roles.update_one(
+        {"message_id": message_id},
+        {"$set": {"guild_id": guild_id, "channel_id": channel_id, "message_id": message_id, "mappings": {}}},
+        upsert=True,
+    )
+
+
+async def add_reaction_role_mapping(message_id: int, emoji: str, role_id: int) -> None:
+    await _reaction_roles.update_one(
+        {"message_id": message_id},
+        {"$set": {f"mappings.{emoji}": role_id}},
+    )
+
+
+async def remove_reaction_role_mapping(message_id: int, emoji: str) -> None:
+    await _reaction_roles.update_one(
+        {"message_id": message_id},
+        {"$unset": {f"mappings.{emoji}": ""}},
+    )
+
+
+async def get_reaction_role_message(message_id: int) -> dict | None:
+    return await _reaction_roles.find_one({"message_id": message_id})
+
+
+async def delete_reaction_role_message(message_id: int) -> None:
+    await _reaction_roles.delete_one({"message_id": message_id})
+
+
+async def list_reaction_role_messages(guild_id: int) -> list:
+    cursor = _reaction_roles.find({"guild_id": guild_id})
+    return await cursor.to_list(length=100)

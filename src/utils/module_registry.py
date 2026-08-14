@@ -63,8 +63,8 @@ MODULES: list[Module] = [
     Module("server_backup", "نسخ احتياطي", "security", "نسخ/استعادة إعدادات السيرفر", False, False),
 
     # --- Phase 2: Engagement ---
-    Module("leveling", "نظام المستويات", "engagement", "XP + رانك كارد بصورة", False, False),
-    Module("reaction_roles", "الرولات بالتفاعل", "engagement", "رول تلقائي عبر ايموجي", False, False),
+    Module("leveling", "نظام المستويات", "engagement", "XP + رانك كارد بصورة", False, True),
+    Module("reaction_roles", "الرولات بالتفاعل", "engagement", "رول تلقائي عبر ايموجي", False, True),
     Module("starboard", "ستاربورد", "engagement", "أرشفة أفضل الرسائل بنجمة", False, False),
     Module("giveaways", "السحوبات", "engagement", "سحوبات جوائز بزر", False, False),
     Module("autoresponder", "الردود التلقائية", "engagement", "رد تلقائي على كلمات محددة", False, False),

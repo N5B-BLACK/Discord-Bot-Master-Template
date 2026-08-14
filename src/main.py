@@ -55,6 +55,8 @@ COGS = [
     "cogs.trap_channel",
     "cogs.auto_divider",
     "cogs.security",
+    "cogs.leveling",
+    "cogs.reaction_roles",
 ]
 
 

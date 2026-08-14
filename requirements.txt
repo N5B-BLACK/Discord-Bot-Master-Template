@@ -8,3 +8,4 @@ davey>=0.1.0
 yt-dlp>=2024.1.1
 imageio-ffmpeg>=0.5.1
 aiohttp>=3.7.4
+Pillow>=10.4.0
