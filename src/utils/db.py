@@ -98,6 +98,18 @@ DEFAULT_SETTINGS = {
             "enabled": False,
             "banned_words": [],
         },
+        "anti_webhook": {
+            "enabled": False,
+            "punishment": "strip_roles",  # "strip_roles" or "ban" - same options as anti_nuke
+        },
+        "raid_mode": {
+            "enabled": False,
+            "join_threshold": 5,          # this many joins...
+            "window_seconds": 10,         # ...within this many seconds triggers a raid response
+            "action": "lockdown",         # "lockdown" (raise verification level temporarily) or "kick_new_accounts"
+            "min_account_age_hours": 24,  # kick_new_accounts mode: only kicks accounts younger than this
+            "lockdown_duration_minutes": 15,  # lockdown mode: auto-reverts verification level after this long
+        },
     },
     # Phase 0 addition (Module Registry) - which whole feature modules are on/off
     # per guild. Seeded from utils/module_registry.py so adding a new planned

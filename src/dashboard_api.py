@@ -308,7 +308,7 @@ async def embeds_send(request: web.Request, bot) -> web.Response:
 # ---------------------------------------------------------
 # Security Suite (Phase 1) - see cogs/security.py for the enforcement side.
 # ---------------------------------------------------------
-_SECURITY_SYSTEMS = {"anti_nuke", "anti_spam", "anti_link", "word_filter"}
+_SECURITY_SYSTEMS = {"anti_nuke", "anti_spam", "anti_link", "word_filter", "anti_webhook", "raid_mode"}
 
 
 async def save_security_toggle(request: web.Request, bot) -> web.Response:
@@ -449,4 +449,40 @@ async def save_link_whitelist_channel(request: web.Request, bot) -> web.Response
         await remove_link_whitelist_channel(guild_id, channel_id)
     else:
         await add_link_whitelist_channel(guild_id, channel_id)
+    return web.json_response({"ok": True})
+
+
+async def save_anti_webhook_config(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    punishment = body.get("punishment") if body.get("punishment") in ("strip_roles", "ban") else "strip_roles"
+    await set_security_setting(guild_id, "anti_webhook.punishment", punishment)
+    return web.json_response({"ok": True})
+
+
+async def save_raid_mode_config(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    try:
+        join_threshold = max(1, int(body.get("join_threshold", 5)))
+        window = max(1, int(body.get("window_seconds", 10)))
+        min_age = max(0, int(body.get("min_account_age_hours", 24)))
+        duration = max(1, int(body.get("lockdown_duration_minutes", 15)))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "numeric fields must be numbers"}, status=400)
+    action = body.get("action") if body.get("action") in ("lockdown", "kick_new_accounts") else "lockdown"
+
+    await set_security_setting(guild_id, "raid_mode.join_threshold", join_threshold)
+    await set_security_setting(guild_id, "raid_mode.window_seconds", window)
+    await set_security_setting(guild_id, "raid_mode.action", action)
+    await set_security_setting(guild_id, "raid_mode.min_account_age_hours", min_age)
+    await set_security_setting(guild_id, "raid_mode.lockdown_duration_minutes", duration)
     return web.json_response({"ok": True})

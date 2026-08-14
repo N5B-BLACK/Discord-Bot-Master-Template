@@ -58,8 +58,8 @@ MODULES: list[Module] = [
     Module("anti_spam", "منع السبام", "security", "كشف وإيقاف السبام تلقائياً", False, True),
     Module("anti_link", "منع الروابط", "security", "حظر روابط غير مسموحة مع استثناءات", False, True),
     Module("word_filter", "فلتر الكلمات", "security", "قائمة كلمات محظورة قابلة للتخصيص", False, True),
-    Module("anti_webhook", "حماية الويبهوكس", "security", "منع إنشاء ويبهوكس غير مصرح", False, False),
-    Module("raid_mode", "وضع الهجوم", "security", "قفل مؤقت للسيرفر عند هجوم أعضاء وهميين", False, False),
+    Module("anti_webhook", "حماية الويبهوكس", "security", "منع إنشاء ويبهوكس غير مصرح", False, True),
+    Module("raid_mode", "وضع الهجوم", "security", "قفل مؤقت للسيرفر عند هجوم أعضاء وهميين", False, True),
     Module("server_backup", "نسخ احتياطي", "security", "نسخ/استعادة إعدادات السيرفر", False, False),
 
     # --- Phase 2: Engagement ---

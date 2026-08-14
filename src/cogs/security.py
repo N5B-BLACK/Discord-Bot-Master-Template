@@ -17,11 +17,11 @@ it's an unrecoverable ban. Anyone in `security.whitelist_user_ids`, the server
 owner, and the bot itself are always exempt from anti-nuke punishment.
 """
 
+import asyncio
 import datetime
 import re
 import time
 from collections import defaultdict, deque
-
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -71,10 +71,39 @@ class Security(commands.Cog):
         self._nuke_events: dict[int, dict[int, deque]] = defaultdict(lambda: defaultdict(deque))
         # guild_id -> user_id -> deque[timestamp] of recent messages
         self._spam_events: dict[int, dict[int, deque]] = defaultdict(lambda: defaultdict(deque))
+        # guild_id -> deque[timestamp] of recent member joins
+        self._join_events: dict[int, deque] = defaultdict(deque)
+        # guild_id -> raid state while a lockdown/kick response is active
+        self._raid_state: dict[int, dict] = {}
+        # guild_id -> discord.VerificationLevel saved before a lockdown, to restore after
+        self._pre_raid_verification: dict[int, discord.VerificationLevel] = {}
 
     security_group = app_commands.Group(
         name="security", description="Configure the security suite (anti-nuke / anti-spam / anti-link / word filter)"
     )
+
+    # -----------------------------------------------------------------
+    # Shared punishment helper (anti-nuke + anti-webhook use the same two options)
+    # -----------------------------------------------------------------
+    async def _punish_actor(self, guild: discord.Guild, actor: discord.abc.User, punishment: str, reason: str) -> str:
+        member = guild.get_member(actor.id)
+        if member is None:
+            return "none (member left)"
+        try:
+            if punishment == "ban":
+                await guild.ban(member, reason=reason)
+                return "banned"
+            roles_to_remove = [r for r in member.roles if r != guild.default_role]
+            if roles_to_remove:
+                await member.remove_roles(*roles_to_remove, reason=reason)
+            return "all roles stripped"
+        except discord.Forbidden:
+            return "none (missing permissions)"
+
+    def _is_exempt(self, guild: discord.Guild, settings: dict, actor_id: int) -> bool:
+        if actor_id == guild.owner_id or actor_id == self.bot.user.id:
+            return True
+        return actor_id in settings.get("security", {}).get("whitelist_user_ids", [])
 
     # -----------------------------------------------------------------
     # Anti-nuke
@@ -90,9 +119,7 @@ class Security(commands.Cog):
             return
         actor = entry.user
 
-        if actor.id == guild.owner_id or actor.id == self.bot.user.id:
-            return
-        if actor.id in settings.get("security", {}).get("whitelist_user_ids", []):
+        if self._is_exempt(guild, settings, actor.id):
             return
 
         now = time.time()
@@ -107,21 +134,9 @@ class Security(commands.Cog):
             return
         events.clear()  # reset so we don't re-punish every single subsequent event
 
-        member = guild.get_member(actor.id)
-        punishment = conf.get("punishment", "strip_roles")
-        action_taken = "none (missing permissions)"
-        try:
-            if member is not None:
-                if punishment == "ban":
-                    await guild.ban(member, reason="Anti-nuke: destructive action threshold exceeded")
-                    action_taken = "banned"
-                else:
-                    roles_to_remove = [r for r in member.roles if r != guild.default_role]
-                    if roles_to_remove:
-                        await member.remove_roles(*roles_to_remove, reason="Anti-nuke: destructive action threshold exceeded")
-                    action_taken = "all roles stripped"
-        except discord.Forbidden:
-            pass
+        action_taken = await self._punish_actor(
+            guild, actor, conf.get("punishment", "strip_roles"), "Anti-nuke: destructive action threshold exceeded"
+        )
 
         embed = await build_embed(
             guild.id,
@@ -142,6 +157,146 @@ class Security(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
         await self._handle_nuke_event(role.guild, discord.AuditLogAction.role_delete, role.id, "Role Deleted")
+
+    # -----------------------------------------------------------------
+    # Anti-webhook - an unauthorized webhook is a common raid/phishing vector
+    # (lets an attacker post as a fake "official" message even after being kicked).
+    # Deletes the webhook itself in addition to punishing whoever created it.
+    # -----------------------------------------------------------------
+    @commands.Cog.listener()
+    async def on_webhooks_update(self, channel: discord.abc.GuildChannel):
+        guild = channel.guild
+        settings = await get_guild_settings(guild.id)
+        conf = settings.get("security", {}).get("anti_webhook", {})
+        if not conf.get("enabled"):
+            return
+
+        # webhook_create's audit-log target is the webhook itself (unknown ahead of
+        # time), so unlike other events here we scan recent audit-log entries by
+        # action + recency rather than by a specific target_id.
+        await asyncio.sleep(1.5)
+        entry = None
+        try:
+            async for e in guild.audit_logs(limit=5, action=discord.AuditLogAction.webhook_create):
+                if (discord.utils.utcnow() - e.created_at).total_seconds() < 10:
+                    entry = e
+                    break
+        except discord.Forbidden:
+            return
+        if entry is None or entry.user is None:
+            return
+        actor = entry.user
+
+        if self._is_exempt(guild, settings, actor.id):
+            return
+
+        try:
+            for webhook in await channel.webhooks():
+                if webhook.user and webhook.user.id == actor.id:
+                    await webhook.delete(reason="Anti-webhook: unauthorized webhook creation")
+        except discord.Forbidden:
+            pass
+
+        action_taken = await self._punish_actor(
+            guild, actor, conf.get("punishment", "strip_roles"), "Anti-webhook: unauthorized webhook creation"
+        )
+
+        embed = await build_embed(
+            guild.id, title="🪝 Anti-Webhook Triggered", color=discord.Color.red(), use_brand_thumbnail=False
+        )
+        embed.timestamp = datetime.datetime.utcnow()
+        embed.add_field(name="User", value=f"{actor} ({actor.id})", inline=False)
+        embed.add_field(name="Channel", value=channel.mention, inline=False)
+        embed.add_field(name="Action taken", value=action_taken, inline=False)
+        await _send_security_log(guild, settings, embed)
+
+    # -----------------------------------------------------------------
+    # Raid mode - detects a burst of joins and responds with either a temporary
+    # verification-level lockdown, or kicking new-enough accounts that join
+    # during the burst window (attackers' throwaway accounts are almost always
+    # brand new; legitimate members joining together, e.g. after a public
+    # announcement, are usually a mix of account ages).
+    # -----------------------------------------------------------------
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        guild = member.guild
+        settings = await get_guild_settings(guild.id)
+        conf = settings.get("security", {}).get("raid_mode", {})
+        if not conf.get("enabled"):
+            return
+
+        now = time.time()
+        window = conf.get("window_seconds", 10)
+        threshold = conf.get("join_threshold", 5)
+        events = self._join_events[guild.id]
+        events.append(now)
+        while events and now - events[0] > window:
+            events.popleft()
+
+        raid_active = self._raid_state.get(guild.id, {}).get("active_until", 0) > now
+        action = conf.get("action", "lockdown")
+
+        if not raid_active and len(events) >= threshold:
+            await self._trigger_raid_response(guild, settings, conf)
+            raid_active = True
+
+        # While a raid response is active, keep applying kick_new_accounts to
+        # every subsequent joiner too - not just the ones that tripped the trigger.
+        if raid_active and action == "kick_new_accounts":
+            await self._maybe_kick_new_account(member, conf)
+
+    async def _trigger_raid_response(self, guild: discord.Guild, settings: dict, conf: dict) -> None:
+        action = conf.get("action", "lockdown")
+        duration_minutes = conf.get("lockdown_duration_minutes", 15)
+        self._raid_state[guild.id] = {"active_until": time.time() + duration_minutes * 60}
+
+        action_taken = "alerted only"
+        if action == "lockdown":
+            try:
+                self._pre_raid_verification[guild.id] = guild.verification_level
+                await guild.edit(
+                    verification_level=discord.VerificationLevel.highest,
+                    reason="Raid mode: join burst detected",
+                )
+                action_taken = f"verification level raised to Highest for {duration_minutes} minutes"
+                self.bot.loop.call_later(
+                    duration_minutes * 60,
+                    lambda: self.bot.loop.create_task(self._revert_lockdown(guild.id)),
+                )
+            except discord.Forbidden:
+                action_taken = "failed (missing Manage Server permission)"
+        elif action == "kick_new_accounts":
+            action_taken = f"kicking accounts younger than {conf.get('min_account_age_hours', 24)}h for {duration_minutes} minutes"
+
+        embed = await build_embed(
+            guild.id, title="🚨 Raid Mode Triggered", color=discord.Color.red(), use_brand_thumbnail=False
+        )
+        embed.timestamp = datetime.datetime.utcnow()
+        embed.add_field(
+            name="Trigger", value=f"{conf.get('join_threshold', 5)}+ joins in {conf.get('window_seconds', 10)}s", inline=False
+        )
+        embed.add_field(name="Response", value=action_taken, inline=False)
+        await _send_security_log(guild, settings, embed)
+
+    async def _revert_lockdown(self, guild_id: int) -> None:
+        guild = self.bot.get_guild(guild_id)
+        original = self._pre_raid_verification.pop(guild_id, None)
+        if guild is None or original is None:
+            return
+        try:
+            await guild.edit(verification_level=original, reason="Raid mode: lockdown expired")
+        except discord.Forbidden:
+            pass
+
+    async def _maybe_kick_new_account(self, member: discord.Member, conf: dict) -> None:
+        min_age_hours = conf.get("min_account_age_hours", 24)
+        age = discord.utils.utcnow() - member.created_at
+        if age.total_seconds() >= min_age_hours * 3600:
+            return
+        try:
+            await member.kick(reason=f"Raid mode: account younger than {min_age_hours}h during join burst")
+        except discord.Forbidden:
+            pass
 
     # -----------------------------------------------------------------
     # Message-based systems: anti-spam, anti-link, word filter
@@ -270,6 +425,8 @@ class Security(commands.Cog):
             ("anti_spam", "Anti-Spam"),
             ("anti_link", "Anti-Link"),
             ("word_filter", "Word Filter"),
+            ("anti_webhook", "Anti-Webhook"),
+            ("raid_mode", "Raid Mode"),
         ):
             conf = security.get(key, {})
             state = "✅ ON" if conf.get("enabled") else "❌ OFF"
@@ -290,6 +447,8 @@ class Security(commands.Cog):
             app_commands.Choice(name="Anti-Spam", value="anti_spam"),
             app_commands.Choice(name="Anti-Link", value="anti_link"),
             app_commands.Choice(name="Word Filter", value="word_filter"),
+            app_commands.Choice(name="Anti-Webhook", value="anti_webhook"),
+            app_commands.Choice(name="Raid Mode", value="raid_mode"),
         ]
     )
     @app_commands.checks.has_permissions(administrator=True)

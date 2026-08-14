@@ -43,6 +43,7 @@ from dashboard_api import (
     remove_divider_channel_route,
     save_anti_nuke_config,
     save_anti_spam_config,
+    save_anti_webhook_config,
     save_banned_word,
     save_branding,
     save_divider_enabled,
@@ -51,6 +52,7 @@ from dashboard_api import (
     save_link_whitelist_channel,
     save_link_whitelist_domain,
     save_log_color,
+    save_raid_mode_config,
     save_security_log_channel,
     save_security_toggle,
     save_security_whitelist_user,
@@ -97,3 +99,5 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_post("/dashboard/{guild_id}/api/security/banned-word", lambda request: save_banned_word(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/security/link-domain", lambda request: save_link_whitelist_domain(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/security/link-channel", lambda request: save_link_whitelist_channel(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/security/anti-webhook", lambda request: save_anti_webhook_config(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/security/raid-mode", lambda request: save_raid_mode_config(request, bot))

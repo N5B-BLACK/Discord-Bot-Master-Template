@@ -592,6 +592,8 @@ async def security_page(request: web.Request, bot) -> web.Response:
     anti_spam = security.get("anti_spam", {})
     anti_link = security.get("anti_link", {})
     word_filter = security.get("word_filter", {})
+    anti_webhook = security.get("anti_webhook", {})
+    raid_mode = security.get("raid_mode", {})
 
     log_channel_options = _build_options(guild, "channel", security.get("log_channel_id"))
     link_channel_options = _build_options(guild, "channel", None)
@@ -755,6 +757,65 @@ async def security_page(request: web.Request, bot) -> web.Response:
             <div class="field-right">
                 <button class="btn" id="add-banned-word-btn">Add</button>
                 <span class="status" id="banned-word-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="group">
+        <h2>Anti-Webhook</h2>
+        {_toggle_row("anti_webhook", "Enabled", anti_webhook.get("enabled"))}
+        <p class="group-hint">Deletes any webhook created by a non-exempt member and punishes the creator - a common raid/phishing vector even after the attacker is kicked.</p>
+        <div class="field">
+            <label>Punishment</label>
+            <div class="field-right">
+                <select id="webhook-punishment">
+                    <option value="strip_roles" {"selected" if anti_webhook.get("punishment", "strip_roles") == "strip_roles" else ""}>Strip all roles</option>
+                    <option value="ban" {"selected" if anti_webhook.get("punishment") == "ban" else ""}>Ban</option>
+                </select>
+            </div>
+        </div>
+        <div class="action-row">
+            <span></span>
+            <div class="field-right">
+                <button class="btn" id="save-webhook-btn">Save</button>
+                <span class="status" id="webhook-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="group">
+        <h2>Raid Mode</h2>
+        {_toggle_row("raid_mode", "Enabled", raid_mode.get("enabled"))}
+        <div class="field">
+            <label>Join threshold</label>
+            <div class="field-right"><input type="number" id="raid-threshold" min="1" value="{raid_mode.get('join_threshold', 5)}" style="width:80px;"></div>
+        </div>
+        <div class="field">
+            <label>Window (seconds)</label>
+            <div class="field-right"><input type="number" id="raid-window" min="1" value="{raid_mode.get('window_seconds', 10)}" style="width:80px;"></div>
+        </div>
+        <div class="field">
+            <label>Response</label>
+            <div class="field-right">
+                <select id="raid-action">
+                    <option value="lockdown" {"selected" if raid_mode.get("action", "lockdown") == "lockdown" else ""}>Raise verification level temporarily</option>
+                    <option value="kick_new_accounts" {"selected" if raid_mode.get("action") == "kick_new_accounts" else ""}>Kick new accounts joining during the burst</option>
+                </select>
+            </div>
+        </div>
+        <div class="field">
+            <label>Lockdown/response duration (minutes)</label>
+            <div class="field-right"><input type="number" id="raid-duration" min="1" value="{raid_mode.get('lockdown_duration_minutes', 15)}" style="width:80px;"></div>
+        </div>
+        <div class="field">
+            <label>Min. account age to allow (hours) - "kick" mode only</label>
+            <div class="field-right"><input type="number" id="raid-min-age" min="0" value="{raid_mode.get('min_account_age_hours', 24)}" style="width:80px;"></div>
+        </div>
+        <div class="action-row">
+            <span></span>
+            <div class="field-right">
+                <button class="btn" id="save-raid-btn">Save</button>
+                <span class="status" id="raid-status"></span>
             </div>
         </div>
     </div>
@@ -1168,6 +1229,36 @@ wireAddRemove('add-whitelist-user-btn', 'add-whitelist-user', 'whitelist-user-st
 wireAddRemove('add-banned-word-btn', 'add-banned-word', 'banned-word-status', '/security/banned-word', 'word', 'remove-banned-word');
 wireAddRemove('add-link-domain-btn', 'add-link-domain', 'link-domain-status', '/security/link-domain', 'domain', 'remove-link-domain');
 wireAddRemove('add-link-channel-btn', 'add-link-channel-select', 'link-channel-status', '/security/link-channel', 'channel_id', 'remove-link-channel');
+
+document.getElementById('save-webhook-btn').addEventListener('click', async function () {
+    const statusEl = document.getElementById('webhook-status');
+    try {
+        const res = await fetch(API_BASE + '/security/anti-webhook', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ punishment: document.getElementById('webhook-punishment').value }),
+        });
+        flashStatus(statusEl, res.ok);
+    } catch (e) { flashStatus(statusEl, false); }
+});
+
+document.getElementById('save-raid-btn').addEventListener('click', async function () {
+    const statusEl = document.getElementById('raid-status');
+    try {
+        const res = await fetch(API_BASE + '/security/raid-mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                join_threshold: parseInt(document.getElementById('raid-threshold').value, 10),
+                window_seconds: parseInt(document.getElementById('raid-window').value, 10),
+                action: document.getElementById('raid-action').value,
+                lockdown_duration_minutes: parseInt(document.getElementById('raid-duration').value, 10),
+                min_account_age_hours: parseInt(document.getElementById('raid-min-age').value, 10),
+            }),
+        });
+        flashStatus(statusEl, res.ok);
+    } catch (e) { flashStatus(statusEl, false); }
+});
 """
 
 BRANDING_JS = """
