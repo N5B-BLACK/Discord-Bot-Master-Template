@@ -15,6 +15,7 @@ from dashboard_core import LOG_COLOR_KEYS, SETTINGS_LABELS, VALID_KEYS, _guarded
 from utils.db import (
     add_auto_divider_channel,
     add_banned_word,
+    add_leveling_ignored_channel,
     add_link_whitelist_channel,
     add_link_whitelist_domain,
     add_security_whitelist_user,
@@ -23,12 +24,15 @@ from utils.db import (
     list_embed_drafts,
     remove_auto_divider_channel,
     remove_banned_word,
+    remove_leveling_ignored_channel,
     remove_link_whitelist_channel,
     remove_link_whitelist_domain,
     remove_security_whitelist_user,
     save_embed_draft,
     set_auto_divider_enabled,
     set_auto_divider_image,
+    set_level_role,
+    set_leveling_setting,
     set_log_color,
     set_security_setting,
     update_guild_setting,
@@ -485,4 +489,89 @@ async def save_raid_mode_config(request: web.Request, bot) -> web.Response:
     await set_security_setting(guild_id, "raid_mode.action", action)
     await set_security_setting(guild_id, "raid_mode.min_account_age_hours", min_age)
     await set_security_setting(guild_id, "raid_mode.lockdown_duration_minutes", duration)
+    return web.json_response({"ok": True})
+
+
+# ---------------------------------------------------------
+# Leveling (Phase 2) - see cogs/leveling.py for XP awarding + rank cards.
+# ---------------------------------------------------------
+async def save_leveling_toggle(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    await set_leveling_setting(guild_id, "enabled", bool(body.get("enabled")))
+    return web.json_response({"ok": True})
+
+
+async def save_leveling_config(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    try:
+        xp_min = max(1, int(body.get("xp_min", 15)))
+        xp_max = max(1, int(body.get("xp_max", 25)))
+        cooldown = max(1, int(body.get("cooldown_seconds", 60)))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "xp_min/xp_max/cooldown must be numbers"}, status=400)
+    if xp_min > xp_max:
+        xp_min, xp_max = xp_max, xp_min
+
+    raw_channel = body.get("announce_channel_id")
+    announce_channel_id = int(raw_channel) if raw_channel else None
+    announce_message = (body.get("announce_message") or "").strip() or None
+
+    await set_leveling_setting(guild_id, "xp_min", xp_min)
+    await set_leveling_setting(guild_id, "xp_max", xp_max)
+    await set_leveling_setting(guild_id, "cooldown_seconds", cooldown)
+    await set_leveling_setting(guild_id, "announce_channel_id", announce_channel_id)
+    if announce_message:
+        await set_leveling_setting(guild_id, "announce_message", announce_message)
+    return web.json_response({"ok": True})
+
+
+async def save_leveling_ignored_channel(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    try:
+        channel_id = int(body.get("channel_id"))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "invalid channel"}, status=400)
+
+    if body.get("remove"):
+        await remove_leveling_ignored_channel(guild_id, channel_id)
+    else:
+        await add_leveling_ignored_channel(guild_id, channel_id)
+    return web.json_response({"ok": True})
+
+
+async def save_level_role(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    try:
+        level = int(body.get("level"))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "invalid level"}, status=400)
+
+    if body.get("remove"):
+        await set_level_role(guild_id, level, None)
+    else:
+        try:
+            role_id = int(body.get("role_id"))
+        except (TypeError, ValueError):
+            return web.json_response({"error": "invalid role"}, status=400)
+        await set_level_role(guild_id, level, role_id)
     return web.json_response({"ok": True})

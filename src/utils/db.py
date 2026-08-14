@@ -454,6 +454,21 @@ async def set_level_role(guild_id: int, level: int, role_id: int | None) -> None
         )
 
 
+async def add_leveling_ignored_channel(guild_id: int, channel_id: int) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$addToSet": {"leveling.ignored_channel_ids": channel_id}, "$set": {"guild_id": guild_id}},
+        upsert=True,
+    )
+
+
+async def remove_leveling_ignored_channel(guild_id: int, channel_id: int) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$pull": {"leveling.ignored_channel_ids": channel_id}},
+    )
+
+
 # ---------------------------------------------------------
 # Reaction Roles (Phase 2) - one document per reaction-role message, keyed by
 # message_id so the listener can do a single indexed lookup per reaction event.

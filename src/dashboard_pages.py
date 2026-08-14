@@ -37,7 +37,7 @@ from dashboard_core import (
     _write_session,
     logger,
 )
-from utils.db import get_guild_settings, list_embed_drafts
+from utils.db import DEFAULT_SETTINGS, get_guild_settings, list_embed_drafts
 from utils.embed_builder import LIMITS
 from utils.message_templates import TEMPLATE_SLOTS
 
@@ -830,6 +830,132 @@ async def security_page(request: web.Request, bot) -> web.Response:
     )
 
 
+async def leveling_page(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id)
+    if not isinstance(guard, discord.Guild):
+        return guard
+    guild = guard
+
+    settings = await get_guild_settings(guild_id)
+    leveling = settings.get("leveling", {})
+
+    announce_channel_options = _build_options(guild, "channel", leveling.get("announce_channel_id"))
+    ignored_channel_options = _build_options(guild, "channel", None)
+    level_role_select_options = _build_options(guild, "role", None)
+
+    def _ignored_channel_rows():
+        ids = leveling.get("ignored_channel_ids", [])
+        if not ids:
+            return '<p class="group-hint">None - XP is earned in every channel.</p>'
+        rows = ""
+        for cid in ids:
+            channel = guild.get_channel(cid)
+            label = f"#{channel.name}" if channel else f"Unknown channel ({cid})"
+            rows += f"""
+            <div class="field">
+                <label>{label}</label>
+                <div class="field-right"><button class="btn danger" data-remove-ignored-channel="{cid}">Remove</button></div>
+            </div>
+            """
+        return rows
+
+    def _level_role_rows():
+        mapping = leveling.get("level_roles", {})
+        if not mapping:
+            return '<p class="group-hint">No level-role rewards set yet.</p>'
+        rows = ""
+        for level_str, role_id in sorted(mapping.items(), key=lambda kv: int(kv[0])):
+            role = guild.get_role(role_id)
+            label = f"@{role.name}" if role else f"Unknown role ({role_id})"
+            rows += f"""
+            <div class="field">
+                <label>Level {level_str} → {label}</label>
+                <div class="field-right"><button class="btn danger" data-remove-level-role="{level_str}">Remove</button></div>
+            </div>
+            """
+        return rows
+
+    content = f"""
+    <div class="eyebrow">Leveling</div>
+    <h1>Reward active members automatically</h1>
+    <p class="subtitle">Members earn XP for messages (with a cooldown so it can't be farmed) and level up over time.</p>
+
+    <div class="group">
+        <h2>General</h2>
+        <div class="action-row">
+            <label style="display:flex;align-items:center;gap:10px;font-size:14px;">
+                <input type="checkbox" id="leveling-toggle" {"checked" if leveling.get("enabled") else ""} style="width:18px;height:18px;">
+                Enabled
+            </label>
+            <span class="status" id="leveling-toggle-status"></span>
+        </div>
+        <div class="field">
+            <label>XP per message (min / max)</label>
+            <div class="field-right">
+                <input type="number" id="xp-min" min="1" value="{leveling.get('xp_min', 15)}" style="width:70px;">
+                <input type="number" id="xp-max" min="1" value="{leveling.get('xp_max', 25)}" style="width:70px;">
+            </div>
+        </div>
+        <div class="field">
+            <label>Cooldown (seconds)</label>
+            <div class="field-right"><input type="number" id="xp-cooldown" min="1" value="{leveling.get('cooldown_seconds', 60)}" style="width:80px;"></div>
+        </div>
+        <div class="field">
+            <label>Announce channel</label>
+            <div class="field-right"><select id="announce-channel">{announce_channel_options}</select></div>
+        </div>
+        <div class="field">
+            <label>Announce message</label>
+            <div class="field-right">
+                <textarea id="announce-message" rows="2" style="min-width:320px;">{leveling.get('announce_message', DEFAULT_SETTINGS['leveling']['announce_message'])}</textarea>
+            </div>
+        </div>
+        <p class="group-hint">Use <code>{{member_mention}}</code> and <code>{{level}}</code> as placeholders. Leave the announce channel unset to announce in the channel the level-up happened in.</p>
+        <div class="action-row">
+            <span></span>
+            <div class="field-right">
+                <button class="btn" id="save-leveling-config-btn">Save</button>
+                <span class="status" id="leveling-config-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="group">
+        <h2>Ignored channels (no XP earned here)</h2>
+        <div id="ignored-channel-list">{_ignored_channel_rows()}</div>
+        <div class="action-row">
+            <select id="add-ignored-channel-select">{ignored_channel_options}</select>
+            <div class="field-right">
+                <button class="btn" id="add-ignored-channel-btn">Add</button>
+                <span class="status" id="ignored-channel-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="group">
+        <h2>Level role rewards</h2>
+        <div id="level-role-list">{_level_role_rows()}</div>
+        <div class="action-row">
+            <input type="number" id="add-level-role-level" min="1" placeholder="Level" style="width:80px;">
+            <select id="add-level-role-select">{level_role_select_options}</select>
+            <div class="field-right">
+                <button class="btn" id="add-level-role-btn">Add</button>
+                <span class="status" id="level-role-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
+    <script>{LEVELING_JS}</script>
+    """
+    body = _sidebar_shell(guild, _icon_url(guild), "leveling", content)
+    return web.Response(
+        text=_page_shell(f"{guild.name} · Leveling", SIDEBAR_STYLES + SETTINGS_STYLES, body),
+        content_type="text/html",
+    )
+
+
 
 async def embeds_page(request: web.Request, bot) -> web.Response:
     guild_id = int(request.match_info["guild_id"])
@@ -1258,6 +1384,105 @@ document.getElementById('save-raid-btn').addEventListener('click', async functio
         });
         flashStatus(statusEl, res.ok);
     } catch (e) { flashStatus(statusEl, false); }
+});
+"""
+
+LEVELING_JS = """
+function flashStatus2(el, ok) {
+    el.textContent = ok ? 'Saved' : 'Error';
+    el.className = 'status show ' + (ok ? 'ok' : 'err');
+    setTimeout(function () { el.classList.remove('show'); }, 1500);
+}
+
+document.getElementById('leveling-toggle').addEventListener('change', async function () {
+    const statusEl = document.getElementById('leveling-toggle-status');
+    try {
+        const res = await fetch(API_BASE + '/leveling/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: this.checked }),
+        });
+        flashStatus2(statusEl, res.ok);
+    } catch (e) { flashStatus2(statusEl, false); }
+});
+
+document.getElementById('save-leveling-config-btn').addEventListener('click', async function () {
+    const statusEl = document.getElementById('leveling-config-status');
+    try {
+        const res = await fetch(API_BASE + '/leveling/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                xp_min: parseInt(document.getElementById('xp-min').value, 10),
+                xp_max: parseInt(document.getElementById('xp-max').value, 10),
+                cooldown_seconds: parseInt(document.getElementById('xp-cooldown').value, 10),
+                announce_channel_id: document.getElementById('announce-channel').value || null,
+                announce_message: document.getElementById('announce-message').value,
+            }),
+        });
+        flashStatus2(statusEl, res.ok);
+    } catch (e) { flashStatus2(statusEl, false); }
+});
+
+document.getElementById('add-ignored-channel-btn').addEventListener('click', async function () {
+    const channelId = document.getElementById('add-ignored-channel-select').value;
+    const statusEl = document.getElementById('ignored-channel-status');
+    if (!channelId) { flashStatus2(statusEl, false); return; }
+    try {
+        const res = await fetch(API_BASE + '/leveling/ignored-channel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel_id: channelId }),
+        });
+        if (!res.ok) throw new Error('failed');
+        location.reload();
+    } catch (e) { flashStatus2(statusEl, false); }
+});
+
+document.querySelectorAll('[data-remove-ignored-channel]').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+        const channelId = btn.getAttribute('data-remove-ignored-channel');
+        try {
+            const res = await fetch(API_BASE + '/leveling/ignored-channel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel_id: channelId, remove: true }),
+            });
+            if (!res.ok) throw new Error('failed');
+            location.reload();
+        } catch (e) { btn.textContent = 'Error'; }
+    });
+});
+
+document.getElementById('add-level-role-btn').addEventListener('click', async function () {
+    const level = document.getElementById('add-level-role-level').value;
+    const roleId = document.getElementById('add-level-role-select').value;
+    const statusEl = document.getElementById('level-role-status');
+    if (!level || !roleId) { flashStatus2(statusEl, false); return; }
+    try {
+        const res = await fetch(API_BASE + '/leveling/level-role', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ level: level, role_id: roleId }),
+        });
+        if (!res.ok) throw new Error('failed');
+        location.reload();
+    } catch (e) { flashStatus2(statusEl, false); }
+});
+
+document.querySelectorAll('[data-remove-level-role]').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+        const level = btn.getAttribute('data-remove-level-role');
+        try {
+            const res = await fetch(API_BASE + '/leveling/level-role', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ level: level, remove: true }),
+            });
+            if (!res.ok) throw new Error('failed');
+            location.reload();
+        } catch (e) { btn.textContent = 'Error'; }
+    });
 });
 """
 

@@ -24,6 +24,7 @@ from dashboard_pages import (
     divider_page,
     embeds_page,
     guild_settings_page,
+    leveling_page,
     login,
     logout,
     logs_page,
@@ -49,6 +50,10 @@ from dashboard_api import (
     save_divider_enabled,
     save_divider_image,
     save_guild_setting,
+    save_level_role,
+    save_leveling_config,
+    save_leveling_ignored_channel,
+    save_leveling_toggle,
     save_link_whitelist_channel,
     save_link_whitelist_domain,
     save_log_color,
@@ -69,6 +74,7 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_get("/dashboard/{guild_id}", lambda request: overview_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/settings", lambda request: guild_settings_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/security", lambda request: security_page(request, bot))
+    app.router.add_get("/dashboard/{guild_id}/leveling", lambda request: leveling_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/logs", lambda request: logs_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/branding", lambda request: branding_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/tickets", lambda request: tickets_page(request, bot))
@@ -101,3 +107,8 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_post("/dashboard/{guild_id}/api/security/link-channel", lambda request: save_link_whitelist_channel(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/security/anti-webhook", lambda request: save_anti_webhook_config(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/security/raid-mode", lambda request: save_raid_mode_config(request, bot))
+
+    app.router.add_post("/dashboard/{guild_id}/api/leveling/toggle", lambda request: save_leveling_toggle(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/leveling/config", lambda request: save_leveling_config(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/leveling/ignored-channel", lambda request: save_leveling_ignored_channel(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/leveling/level-role", lambda request: save_level_role(request, bot))

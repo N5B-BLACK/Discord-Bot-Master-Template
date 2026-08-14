@@ -120,6 +120,7 @@ NAV_ITEMS = [
     ("", "Overview", "overview"),
     ("settings", "Server Settings", "settings"),
     ("security", "Security", "security"),
+    ("leveling", "Leveling", "leveling"),
     ("logs", "Logs", "logs"),
     ("branding", "Branding", "branding"),
     ("tickets", "Ticket Panel", "tickets"),
