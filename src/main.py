@@ -57,6 +57,7 @@ COGS = [
     "cogs.security",
     "cogs.leveling",
     "cogs.reaction_roles",
+    "cogs.voice_rooms",
 ]
 
 

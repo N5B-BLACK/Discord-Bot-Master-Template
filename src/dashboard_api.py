@@ -36,6 +36,7 @@ from utils.db import (
     set_log_color,
     set_security_setting,
     update_guild_setting,
+    set_voice_rooms_setting,
 )
 from utils.embed_builder import EmbedValidationError, blank_embed_json, to_discord_embed
 from utils.log_helper import log_setting_change
@@ -574,4 +575,43 @@ async def save_level_role(request: web.Request, bot) -> web.Response:
         except (TypeError, ValueError):
             return web.json_response({"error": "invalid role"}, status=400)
         await set_level_role(guild_id, level, role_id)
+    return web.json_response({"ok": True})
+
+
+# ---------------------------------------------------------
+# Voice Rooms (Phase 3) - see cogs/voice_rooms.py for the join-to-create logic.
+# ---------------------------------------------------------
+async def save_voice_rooms_toggle(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    await set_voice_rooms_setting(guild_id, "enabled", bool(body.get("enabled")))
+    return web.json_response({"ok": True})
+
+
+async def save_voice_rooms_config(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    raw_hub = body.get("hub_channel_id")
+    raw_category = body.get("category_id")
+    try:
+        hub_channel_id = int(raw_hub) if raw_hub else None
+        category_id = int(raw_category) if raw_category else None
+        default_user_limit = max(0, min(99, int(body.get("default_user_limit", 0))))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "invalid field"}, status=400)
+
+    name_template = (body.get("name_template") or "").strip() or "{username}'s Room"
+
+    await set_voice_rooms_setting(guild_id, "hub_channel_id", hub_channel_id)
+    await set_voice_rooms_setting(guild_id, "category_id", category_id)
+    await set_voice_rooms_setting(guild_id, "name_template", name_template)
+    await set_voice_rooms_setting(guild_id, "default_user_limit", default_user_limit)
     return web.json_response({"ok": True})

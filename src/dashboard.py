@@ -32,6 +32,7 @@ from dashboard_pages import (
     security_page,
     templates_page,
     tickets_page,
+    voice_rooms_page,
 )
 from dashboard_api import (
     add_divider_channel_route,
@@ -62,6 +63,8 @@ from dashboard_api import (
     save_security_toggle,
     save_security_whitelist_user,
     save_template_slot,
+    save_voice_rooms_config,
+    save_voice_rooms_toggle,
 )
 
 
@@ -75,6 +78,7 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_get("/dashboard/{guild_id}/settings", lambda request: guild_settings_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/security", lambda request: security_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/leveling", lambda request: leveling_page(request, bot))
+    app.router.add_get("/dashboard/{guild_id}/voice-rooms", lambda request: voice_rooms_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/logs", lambda request: logs_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/branding", lambda request: branding_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/tickets", lambda request: tickets_page(request, bot))
@@ -112,3 +116,6 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_post("/dashboard/{guild_id}/api/leveling/config", lambda request: save_leveling_config(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/leveling/ignored-channel", lambda request: save_leveling_ignored_channel(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/leveling/level-role", lambda request: save_level_role(request, bot))
+
+    app.router.add_post("/dashboard/{guild_id}/api/voice-rooms/toggle", lambda request: save_voice_rooms_toggle(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/voice-rooms/config", lambda request: save_voice_rooms_config(request, bot))

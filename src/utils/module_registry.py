@@ -70,7 +70,7 @@ MODULES: list[Module] = [
     Module("autoresponder", "الردود التلقائية", "engagement", "رد تلقائي على كلمات محددة", False, False),
 
     # --- Phase 3: Community / voice ---
-    Module("voice_rooms", "الرومات الخاصة", "community", "رومات صوتية خاصة يتحكم فيها العضو", False, False),
+    Module("voice_rooms", "الرومات الخاصة", "community", "رومات صوتية خاصة يتحكم فيها العضو", False, True),
     Module("invite_tracking", "تتبع الدعوات", "community", "من دعا مين + إحصائيات", False, False),
 ]
 

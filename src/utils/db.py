@@ -18,6 +18,7 @@ _warnings = _db["warnings"]
 _embed_drafts = _db["embed_drafts"]
 _user_levels = _db["user_levels"]
 _reaction_roles = _db["reaction_roles"]
+_voice_rooms = _db["voice_rooms"]
 
 
 async def check_connection() -> bool:
@@ -125,6 +126,16 @@ DEFAULT_SETTINGS = {
         "announce_message": "🎉 {member_mention} leveled up to **level {level}**!",
         "level_roles": {},        # {"5": role_id, "10": role_id, ...} - awarded automatically on reaching that level
         "ignored_channel_ids": [],
+    },
+    # Phase 3 (Community) - private voice rooms. Active rooms themselves live in
+    # their own `voice_rooms` collection (one doc per temp channel); this block
+    # is just the per-guild *configuration* of the "join to create" system.
+    "voice_rooms": {
+        "enabled": False,
+        "hub_channel_id": None,       # the voice channel members join to trigger room creation
+        "category_id": None,          # where new rooms are created; None = same category as the hub
+        "name_template": "{username}'s Room",
+        "default_user_limit": 0,      # 0 = unlimited
     },
     # Phase 0 addition (Module Registry) - which whole feature modules are on/off
     # per guild. Seeded from utils/module_registry.py so adding a new planned
@@ -506,3 +517,32 @@ async def delete_reaction_role_message(message_id: int) -> None:
 async def list_reaction_role_messages(guild_id: int) -> list:
     cursor = _reaction_roles.find({"guild_id": guild_id})
     return await cursor.to_list(length=100)
+
+
+async def set_voice_rooms_setting(guild_id: int, dotted_key: str, value) -> None:
+    """Generic setter for nested voice_rooms.* fields, e.g. 'hub_channel_id'."""
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$set": {f"voice_rooms.{dotted_key}": value, "guild_id": guild_id}},
+        upsert=True,
+    )
+
+
+async def create_voice_room(guild_id: int, channel_id: int, owner_id: int) -> None:
+    await _voice_rooms.update_one(
+        {"channel_id": channel_id},
+        {"$set": {"guild_id": guild_id, "channel_id": channel_id, "owner_id": owner_id}},
+        upsert=True,
+    )
+
+
+async def get_voice_room(channel_id: int) -> dict | None:
+    return await _voice_rooms.find_one({"channel_id": channel_id})
+
+
+async def set_voice_room_owner(channel_id: int, owner_id: int) -> None:
+    await _voice_rooms.update_one({"channel_id": channel_id}, {"$set": {"owner_id": owner_id}})
+
+
+async def delete_voice_room(channel_id: int) -> None:
+    await _voice_rooms.delete_one({"channel_id": channel_id})

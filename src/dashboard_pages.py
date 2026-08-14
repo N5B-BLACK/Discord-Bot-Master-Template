@@ -157,12 +157,19 @@ async def dashboard_home(request: web.Request, bot) -> web.Response:
 
 
 def _build_options(guild: discord.Guild, kind: str, current_value):
-    """Builds <option> tags for a role or text-channel select, filtering out
-    @everyone / managed (bot, booster, integration) roles, matching /setup's behavior."""
+    """Builds <option> tags for a role / text-channel / voice-channel / category
+    select, filtering out @everyone / managed (bot, booster, integration) roles,
+    matching /setup's behavior."""
     options = ['<option value="">— Not set —</option>']
     if kind == "role":
         items = [r for r in guild.roles if not r.managed and r.name != "@everyone"]
         items.sort(key=lambda r: r.position, reverse=True)
+    elif kind == "voice":
+        items = list(guild.voice_channels)
+        items.sort(key=lambda c: c.position)
+    elif kind == "category":
+        items = list(guild.categories)
+        items.sort(key=lambda c: c.position)
     else:
         items = list(guild.text_channels)
         items.sort(key=lambda c: c.position)
@@ -956,6 +963,73 @@ async def leveling_page(request: web.Request, bot) -> web.Response:
     )
 
 
+async def voice_rooms_page(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id)
+    if not isinstance(guard, discord.Guild):
+        return guard
+    guild = guard
+
+    settings = await get_guild_settings(guild_id)
+    voice_rooms = settings.get("voice_rooms", {})
+
+    hub_options = _build_options(guild, "voice", voice_rooms.get("hub_channel_id"))
+    category_options = _build_options(guild, "category", voice_rooms.get("category_id"))
+
+    content = f"""
+    <div class="eyebrow">Voice Rooms</div>
+    <h1>Give every member their own private room</h1>
+    <p class="subtitle">
+        Members join the hub channel below, and the bot instantly creates a private voice room for them -
+        they get full control over it (lock, rename, limit, kick, permit, block) via <code>/room</code> commands.
+        The room disappears automatically once it's empty.
+    </p>
+
+    <div class="group">
+        <h2>General</h2>
+        <div class="action-row">
+            <label style="display:flex;align-items:center;gap:10px;font-size:14px;">
+                <input type="checkbox" id="vr-toggle" {"checked" if voice_rooms.get("enabled") else ""} style="width:18px;height:18px;">
+                Enabled
+            </label>
+            <span class="status" id="vr-toggle-status"></span>
+        </div>
+        <div class="field">
+            <label>Hub voice channel ("join to create")</label>
+            <div class="field-right"><select id="vr-hub-channel">{hub_options}</select></div>
+        </div>
+        <div class="field">
+            <label>Category for new rooms</label>
+            <div class="field-right"><select id="vr-category">{category_options}</select></div>
+        </div>
+        <div class="field">
+            <label>Room name template</label>
+            <div class="field-right"><input type="text" id="vr-name-template" value="{voice_rooms.get('name_template', "{{username}}'s Room")}" style="min-width:260px;"></div>
+        </div>
+        <div class="field">
+            <label>Default user limit (0 = unlimited)</label>
+            <div class="field-right"><input type="number" id="vr-default-limit" min="0" max="99" value="{voice_rooms.get('default_user_limit', 0)}" style="width:80px;"></div>
+        </div>
+        <p class="group-hint">Use <code>{{username}}</code> in the name template - it's replaced with the member's display name.</p>
+        <div class="action-row">
+            <span></span>
+            <div class="field-right">
+                <button class="btn" id="save-vr-btn">Save</button>
+                <span class="status" id="vr-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
+    <script>{VOICE_ROOMS_JS}</script>
+    """
+    body = _sidebar_shell(guild, _icon_url(guild), "voice-rooms", content)
+    return web.Response(
+        text=_page_shell(f"{guild.name} · Voice Rooms", SIDEBAR_STYLES + SETTINGS_STYLES, body),
+        content_type="text/html",
+    )
+
+
 
 async def embeds_page(request: web.Request, bot) -> web.Response:
     guild_id = int(request.match_info["guild_id"])
@@ -1483,6 +1557,43 @@ document.querySelectorAll('[data-remove-level-role]').forEach(function (btn) {
             location.reload();
         } catch (e) { btn.textContent = 'Error'; }
     });
+});
+"""
+
+VOICE_ROOMS_JS = """
+function flashStatus3(el, ok) {
+    el.textContent = ok ? 'Saved' : 'Error';
+    el.className = 'status show ' + (ok ? 'ok' : 'err');
+    setTimeout(function () { el.classList.remove('show'); }, 1500);
+}
+
+document.getElementById('vr-toggle').addEventListener('change', async function () {
+    const statusEl = document.getElementById('vr-toggle-status');
+    try {
+        const res = await fetch(API_BASE + '/voice-rooms/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: this.checked }),
+        });
+        flashStatus3(statusEl, res.ok);
+    } catch (e) { flashStatus3(statusEl, false); }
+});
+
+document.getElementById('save-vr-btn').addEventListener('click', async function () {
+    const statusEl = document.getElementById('vr-status');
+    try {
+        const res = await fetch(API_BASE + '/voice-rooms/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                hub_channel_id: document.getElementById('vr-hub-channel').value || null,
+                category_id: document.getElementById('vr-category').value || null,
+                name_template: document.getElementById('vr-name-template').value,
+                default_user_limit: parseInt(document.getElementById('vr-default-limit').value, 10),
+            }),
+        });
+        flashStatus3(statusEl, res.ok);
+    } catch (e) { flashStatus3(statusEl, false); }
 });
 """
 

@@ -121,6 +121,7 @@ NAV_ITEMS = [
     ("settings", "Server Settings", "settings"),
     ("security", "Security", "security"),
     ("leveling", "Leveling", "leveling"),
+    ("voice-rooms", "Voice Rooms", "voice-rooms"),
     ("logs", "Logs", "logs"),
     ("branding", "Branding", "branding"),
     ("tickets", "Ticket Panel", "tickets"),
