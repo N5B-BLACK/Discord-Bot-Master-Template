@@ -10,21 +10,38 @@ import asyncio
 
 import discord
 
-from utils.db import get_guild_settings
+from utils.db import get_guild_settings, record_event_log
 
 
 async def send_guild_log(guild: discord.Guild, setting_key: str, embed: discord.Embed, **send_kwargs) -> None:
     settings = await get_guild_settings(guild.id)
     channel_id = settings.get(setting_key)
+
+    color_override = (settings.get("log_colors") or {}).get(setting_key)
+    if color_override is not None:
+        embed.colour = discord.Color(color_override)
+
+    # Many log embeds put their real content in fields (add_field) rather than
+    # the description - fall back to joining those so search still has
+    # something meaningful to match against.
+    description = embed.description or ""
+    if not description and embed.fields:
+        description = " · ".join(f"{f.name}: {f.value}" for f in embed.fields if f.name and f.value)
+
+    # Recorded regardless of whether a channel is configured - an admin who sets
+    # up log history search before picking channels shouldn't lose that window
+    # of events, and this is the one place every log-producing cog already
+    # routes through, so no other file needed to change for this to work.
+    await record_event_log(
+        guild.id, setting_key, embed.title or "", description,
+        embed.colour.value if embed.colour else 0,
+    )
+
     if not channel_id:
         return
     channel = guild.get_channel(channel_id)
     if not channel:
         return
-
-    color_override = (settings.get("log_colors") or {}).get(setting_key)
-    if color_override is not None:
-        embed.colour = discord.Color(color_override)
 
     await channel.send(embed=embed, **send_kwargs)
 

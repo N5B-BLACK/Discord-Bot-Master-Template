@@ -36,6 +36,7 @@ from utils.db import (
     remove_link_whitelist_channel,
     remove_link_whitelist_domain,
     remove_security_whitelist_user,
+    record_event_log,
     set_security_setting,
 )
 from utils.embed_helper import build_embed
@@ -54,13 +55,24 @@ NUKE_ACTIONS = {
 async def _send_security_log(guild: discord.Guild, settings: dict, embed: discord.Embed) -> None:
     """Security alerts go to security.log_channel_id if set, else fall back to the
     warn log so an alert is never silently dropped just because an admin only set
-    up one of the two channels."""
+    up one of the two channels. Recorded to Log History exactly once either way:
+    the fallback path already records via send_guild_log() itself, so only the
+    dedicated-channel path (which bypasses that helper) needs to record here."""
     security = settings.get("security", {})
     channel_id = security.get("log_channel_id")
     channel = guild.get_channel(channel_id) if channel_id else None
+
     if channel is None:
         await send_guild_log(guild, "warn_log_channel_id", embed)
         return
+
+    description = embed.description or ""
+    if not description and embed.fields:
+        description = " · ".join(f"{f.name}: {f.value}" for f in embed.fields if f.name and f.value)
+    await record_event_log(
+        guild.id, "security_log_channel_id", embed.title or "", description,
+        embed.colour.value if embed.colour else 0,
+    )
     await channel.send(embed=embed)
 
 

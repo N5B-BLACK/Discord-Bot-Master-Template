@@ -133,6 +133,7 @@ NAV_ITEMS = [
     ("leveling", "Leveling", "leveling", "engagement"),
     ("voice-rooms", "Voice Rooms", "voice-rooms", "community"),
     ("logs", "Logs", "logs", "core"),
+    ("log-history", "Log History", "log-history", "core"),
     ("branding", "Branding", "branding", "core"),
     ("tickets", "Ticket Panel", "tickets", "core"),
     ("embeds", "Embed Builder", "embeds", "core"),
@@ -736,8 +737,44 @@ def _page_shell(title: str, extra_styles: str, body: str) -> str:
 </html>"""
 
 
-def _sidebar_shell(guild: discord.Guild, icon_url: str, active: str, content: str, wide: bool = False) -> str:
-    """Wraps page content in the standard sidebar layout used by every guild-scoped page."""
+def _hex_to_rgb(hex_str: str) -> tuple[int, int, int]:
+    hex_str = hex_str.lstrip("#")
+    return int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16)
+
+
+def _sidebar_shell(
+    guild: discord.Guild, icon_url: str, active: str, content: str, wide: bool = False, branding: dict = None
+) -> str:
+    """Wraps page content in the standard sidebar layout used by every guild-scoped page.
+
+    `branding` is the guild's `dashboard_branding` settings dict (product_name /
+    logo_url / accent_hex) - white-labeling for whoever operates this guild's
+    bot deployment. Optional and defaults to the stock look, so any caller that
+    doesn't pass it (or passes {}) is unaffected."""
+    branding = branding or {}
+    product_name = branding.get("product_name") or "Bot Dashboard"
+    brand_logo_url = branding.get("logo_url")
+    accent_hex = branding.get("accent_hex")
+
+    accent_override = ""
+    if accent_hex:
+        try:
+            r, g, b = _hex_to_rgb(accent_hex)
+            accent_override = f"""<style>
+                :root {{
+                    --signal: {accent_hex};
+                    --signal-dim: rgba({r}, {g}, {b}, 0.14);
+                    --signal-ring: rgba({r}, {g}, {b}, 0.32);
+                }}
+            </style>"""
+        except (ValueError, IndexError):
+            pass  # malformed hex saved somehow - silently fall back to the default accent rather than break the page
+
+    brand_mark = (
+        f'<img src="{brand_logo_url}" alt="" style="width:18px;height:18px;border-radius:5px;">'
+        if brand_logo_url else '<span class="brand-dot"></span>'
+    )
+
     nav_html = ""
     for path, label, key, category in NAV_ITEMS:
         href = f"/dashboard/{guild.id}/{path}" if path else f"/dashboard/{guild.id}"
@@ -747,11 +784,12 @@ def _sidebar_shell(guild: discord.Guild, icon_url: str, active: str, content: st
 
     container_cls = "page-container wide" if wide else "page-container"
     return f"""
+    {accent_override}
     <div class="app-layout">
         <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="document.getElementById('sidebar').classList.remove('open'); this.classList.remove('show');"></div>
         <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <div class="brand"><span class="brand-dot"></span> Bot Dashboard</div>
+                <div class="brand">{brand_mark} {product_name}</div>
                 <div class="sidebar-guild">
                     <img src="{icon_url}" alt="">
                     <span class="sidebar-guild-name">{guild.name}</span>

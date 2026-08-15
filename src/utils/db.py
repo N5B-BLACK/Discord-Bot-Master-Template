@@ -3,6 +3,8 @@ MongoDB access layer - stores each server's (guild) settings separately.
 Each guild has its own document, keyed by guild_id.
 """
 
+import datetime
+
 import motor.motor_asyncio
 from pymongo import ReturnDocument
 
@@ -19,6 +21,8 @@ _embed_drafts = _db["embed_drafts"]
 _user_levels = _db["user_levels"]
 _reaction_roles = _db["reaction_roles"]
 _voice_rooms = _db["voice_rooms"]
+_guild_stats_daily = _db["guild_stats_daily"]
+_event_logs = _db["event_logs"]
 
 
 async def check_connection() -> bool:
@@ -136,6 +140,16 @@ DEFAULT_SETTINGS = {
         "category_id": None,          # where new rooms are created; None = same category as the hub
         "name_template": "{username}'s Room",
         "default_user_limit": 0,      # 0 = unlimited
+    },
+    # Phase 4 (White-label) - lets whoever owns this guild's bot deployment
+    # (e.g. Ali's client) rebrand the dashboard chrome itself - the sidebar
+    # name/logo and the accent color - without touching any code. Distinct
+    # from embed_color/embed_icon_url above, which only affect the bot's own
+    # Discord embeds, not the web dashboard's appearance.
+    "dashboard_branding": {
+        "product_name": None,   # None = falls back to "Bot Dashboard"
+        "logo_url": None,       # None = falls back to the guild's own icon
+        "accent_hex": None,     # None = falls back to the default amber accent
     },
     # Phase 0 addition (Module Registry) - which whole feature modules are on/off
     # per guild. Seeded from utils/module_registry.py so adding a new planned
@@ -519,6 +533,15 @@ async def list_reaction_role_messages(guild_id: int) -> list:
     return await cursor.to_list(length=100)
 
 
+async def set_dashboard_branding_setting(guild_id: int, dotted_key: str, value) -> None:
+    """Generic setter for nested dashboard_branding.* fields, e.g. 'product_name'."""
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$set": {f"dashboard_branding.{dotted_key}": value, "guild_id": guild_id}},
+        upsert=True,
+    )
+
+
 async def set_voice_rooms_setting(guild_id: int, dotted_key: str, value) -> None:
     """Generic setter for nested voice_rooms.* fields, e.g. 'hub_channel_id'."""
     await _guild_settings.update_one(
@@ -546,3 +569,90 @@ async def set_voice_room_owner(channel_id: int, owner_id: int) -> None:
 
 async def delete_voice_room(channel_id: int) -> None:
     await _voice_rooms.delete_one({"channel_id": channel_id})
+
+
+# ---------------------------------------------------------
+# Analytics (Phase 4) - one document per (guild, calendar day, UTC), storing
+# just the handful of counters the Overview page's charts need. Kept as its
+# own tiny collection rather than folded into guild_settings since it's
+# high-write-frequency (every message) and grows over time, unlike settings.
+# ---------------------------------------------------------
+def _today_str() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+
+
+async def increment_daily_stat(guild_id: int, field: str, amount: int = 1) -> None:
+    """field is one of: messages, joins, leaves."""
+    date = _today_str()
+    await _guild_stats_daily.update_one(
+        {"guild_id": guild_id, "date": date},
+        {"$inc": {field: amount}, "$set": {"guild_id": guild_id, "date": date}},
+        upsert=True,
+    )
+
+
+async def set_member_count_snapshot(guild_id: int, count: int) -> None:
+    date = _today_str()
+    await _guild_stats_daily.update_one(
+        {"guild_id": guild_id, "date": date},
+        {"$set": {"member_count_snapshot": count, "guild_id": guild_id, "date": date}},
+        upsert=True,
+    )
+
+
+async def get_daily_stats(guild_id: int, days: int = 14) -> list:
+    """Returns exactly `days` entries in chronological order (oldest first),
+    zero-filled for any day with no activity, so the chart renderer never has
+    to deal with gaps."""
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    date_strs = [(today - datetime.timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days - 1, -1, -1)]
+
+    cursor = _guild_stats_daily.find({"guild_id": guild_id, "date": {"$in": date_strs}})
+    by_date = {doc["date"]: doc async for doc in cursor}
+
+    results = []
+    last_known_snapshot = None
+    for date_str in date_strs:
+        doc = by_date.get(date_str, {})
+        snapshot = doc.get("member_count_snapshot")
+        if snapshot is not None:
+            last_known_snapshot = snapshot
+        results.append({
+            "date": date_str,
+            "messages": doc.get("messages", 0),
+            "joins": doc.get("joins", 0),
+            "leaves": doc.get("leaves", 0),
+            "member_count_snapshot": last_known_snapshot,
+        })
+    return results
+
+
+# ---------------------------------------------------------
+# Log History (Phase 4) - a searchable record of everything that's ever been
+# sent to any of the guild's log channels, written by the single shared
+# utils/log_helper.send_guild_log() function every log-producing cog already
+# calls - so this needed zero changes to moderation.py, voice_logs.py,
+# audit_logs.py, server_logs.py, security.py, or setup.py to start working.
+# ---------------------------------------------------------
+async def record_event_log(guild_id: int, setting_key: str, title: str, description: str, color: int) -> None:
+    await _event_logs.insert_one({
+        "guild_id": guild_id,
+        "setting_key": setting_key,
+        "title": title or "",
+        "description": description or "",
+        "color": color,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc),
+    })
+
+
+async def get_event_logs(guild_id: int, setting_key: str = None, search: str = None, limit: int = 50) -> list:
+    query = {"guild_id": guild_id}
+    if setting_key:
+        query["setting_key"] = setting_key
+    if search:
+        query["$or"] = [
+            {"title": {"$regex": search, "$options": "i"}},
+            {"description": {"$regex": search, "$options": "i"}},
+        ]
+    cursor = _event_logs.find(query).sort("timestamp", -1).limit(min(limit, 200))
+    return await cursor.to_list(length=min(limit, 200))

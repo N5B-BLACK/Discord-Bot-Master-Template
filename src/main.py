@@ -58,6 +58,7 @@ COGS = [
     "cogs.leveling",
     "cogs.reaction_roles",
     "cogs.voice_rooms",
+    "cogs.stats",
 ]
 
 

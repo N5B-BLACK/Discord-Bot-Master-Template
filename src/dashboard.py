@@ -25,6 +25,7 @@ from dashboard_pages import (
     embeds_page,
     guild_settings_page,
     leveling_page,
+    log_history_page,
     login,
     logout,
     logs_page,
@@ -41,6 +42,7 @@ from dashboard_api import (
     embeds_list,
     embeds_save,
     embeds_send,
+    get_log_history,
     post_ticket_panel,
     remove_divider_channel_route,
     save_anti_nuke_config,
@@ -48,6 +50,7 @@ from dashboard_api import (
     save_anti_webhook_config,
     save_banned_word,
     save_branding,
+    save_dashboard_branding,
     save_divider_enabled,
     save_divider_image,
     save_guild_setting,
@@ -80,6 +83,8 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_get("/dashboard/{guild_id}/leveling", lambda request: leveling_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/voice-rooms", lambda request: voice_rooms_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/logs", lambda request: logs_page(request, bot))
+    app.router.add_get("/dashboard/{guild_id}/log-history", lambda request: log_history_page(request, bot))
+    app.router.add_get("/dashboard/{guild_id}/api/log-history", lambda request: get_log_history(request, bot))
     app.router.add_get("/dashboard/{guild_id}/branding", lambda request: branding_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/tickets", lambda request: tickets_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/embeds", lambda request: embeds_page(request, bot))
@@ -89,6 +94,7 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_post("/dashboard/{guild_id}/api/settings", lambda request: save_guild_setting(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/log-color", lambda request: save_log_color(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/branding", lambda request: save_branding(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/dashboard-branding", lambda request: save_dashboard_branding(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/templates", lambda request: save_template_slot(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/post-ticket-panel", lambda request: post_ticket_panel(request, bot))
     app.router.add_get("/dashboard/{guild_id}/api/embeds/list", lambda request: embeds_list(request, bot))

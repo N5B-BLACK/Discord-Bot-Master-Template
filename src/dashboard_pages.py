@@ -26,6 +26,7 @@ from dashboard_core import (
     LOG_GROUPS,
     OVERVIEW_STYLES,
     SETTINGS_GROUPS,
+    SETTINGS_LABELS,
     SETTINGS_STYLES,
     SIDEBAR_STYLES,
     VALID_KEYS,
@@ -37,7 +38,8 @@ from dashboard_core import (
     _write_session,
     logger,
 )
-from utils.db import DEFAULT_SETTINGS, get_guild_settings, list_embed_drafts
+from utils.db import DEFAULT_SETTINGS, get_daily_stats, get_guild_settings, list_embed_drafts
+from utils.chart_svg import bar_chart_svg, line_chart_svg
 from utils.embed_builder import LIMITS
 from utils.message_templates import TEMPLATE_SLOTS
 
@@ -198,6 +200,34 @@ async def overview_page(request: web.Request, bot) -> web.Response:
     settings = await get_guild_settings(guild_id)
     configured_count = sum(1 for k in VALID_KEYS if settings.get(k))
     drafts = await list_embed_drafts(guild_id)
+    daily_stats = await get_daily_stats(guild_id, days=14)
+
+    member_series = [d["member_count_snapshot"] or 0 for d in daily_stats]
+    message_series = [d["messages"] for d in daily_stats]
+    has_history = any(d["member_count_snapshot"] is not None for d in daily_stats)
+
+    if has_history:
+        # Backfill any leading days before the bot started tracking with the
+        # first known snapshot, so the line doesn't dip to zero at the start.
+        first_known = next((v for v in member_series if v), guild.member_count or 0)
+        member_series = [v or first_known for v in member_series]
+        charts_html = f"""
+        <div class="group">
+            <h2>Member growth (14 days)</h2>
+            {line_chart_svg(member_series, color="#F0A94E")}
+        </div>
+        <div class="group">
+            <h2>Messages per day (14 days)</h2>
+            {bar_chart_svg(message_series, color="#9A87F0")}
+        </div>
+        """
+    else:
+        charts_html = """
+        <div class="group">
+            <h2>Activity</h2>
+            <p class="group-hint">Charts appear here once the bot has been running for a day or two - come back soon.</p>
+        </div>
+        """
 
     content = f"""
     <div class="eyebrow">Server</div>
@@ -209,6 +239,8 @@ async def overview_page(request: web.Request, bot) -> web.Response:
         <div class="stat-card"><div class="stat-value">{configured_count}/{len(VALID_KEYS)}</div><div class="stat-label">Settings configured</div></div>
         <div class="stat-card"><div class="stat-value">{len(drafts)}</div><div class="stat-label">Saved embed drafts</div></div>
     </div>
+
+    {charts_html}
 
     <div class="eb-section-title" style="margin-top:0;">Quick links</div>
     <div class="quick-grid">
@@ -230,7 +262,7 @@ async def overview_page(request: web.Request, bot) -> web.Response:
         </a>
     </div>
     """
-    body = _sidebar_shell(guild, _icon_url(guild), "overview", content)
+    body = _sidebar_shell(guild, _icon_url(guild), "overview", content, branding=settings.get("dashboard_branding", {}))
     return web.Response(text=_page_shell(f"{guild.name} · Overview", SIDEBAR_STYLES + OVERVIEW_STYLES, body), content_type="text/html")
 
 
@@ -285,7 +317,7 @@ async def guild_settings_page(request: web.Request, bot) -> web.Response:
     <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
     <script>{SETTINGS_JS}</script>
     """
-    body = _sidebar_shell(guild, _icon_url(guild), "settings", content)
+    body = _sidebar_shell(guild, _icon_url(guild), "settings", content, branding=settings.get("dashboard_branding", {}))
     return web.Response(text=_page_shell(f"{guild.name} · Settings", SIDEBAR_STYLES + SETTINGS_STYLES, body), content_type="text/html")
 
 
@@ -345,8 +377,46 @@ async def logs_page(request: web.Request, bot) -> web.Response:
     <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
     <script>{SETTINGS_JS}</script>
     """
-    body = _sidebar_shell(guild, _icon_url(guild), "logs", content)
+    body = _sidebar_shell(guild, _icon_url(guild), "logs", content, branding=settings.get("dashboard_branding", {}))
     return web.Response(text=_page_shell(f"{guild.name} · Logs", SIDEBAR_STYLES + SETTINGS_STYLES, body), content_type="text/html")
+
+
+async def log_history_page(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id)
+    if not isinstance(guard, discord.Guild):
+        return guard
+    guild = guard
+
+    settings = await get_guild_settings(guild_id)
+    category_labels = {**SETTINGS_LABELS, "security_log_channel_id": "Security Alerts"}
+    log_setting_keys = [key for _, fields in LOG_GROUPS for key, *_ in fields] + ["security_log_channel_id"]
+    category_options = '<option value="">All categories</option>' + "\n".join(
+        f'<option value="{key}">{category_labels.get(key, key)}</option>' for key in log_setting_keys
+    )
+
+    content = f"""
+    <div class="eyebrow">Logs</div>
+    <h1>Log history</h1>
+    <p class="subtitle">
+        Every event ever sent to a log channel, searchable - even ones sent before the channel was configured.
+        Pulled from the same events shown in Discord, just easier to search back through.
+    </p>
+
+    <div class="group" style="padding-bottom:22px;">
+        <div class="action-row" style="padding-top:0;">
+            <input type="text" id="lh-search" placeholder="Search titles and details…" style="flex:1;min-width:0;">
+            <select id="lh-category">{category_options}</select>
+        </div>
+    </div>
+
+    <div id="lh-results"><p class="group-hint">Loading…</p></div>
+
+    <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
+    <script>{LOG_HISTORY_JS}</script>
+    """
+    body = _sidebar_shell(guild, _icon_url(guild), "log-history", content, branding=settings.get("dashboard_branding", {}))
+    return web.Response(text=_page_shell(f"{guild.name} · Log History", SIDEBAR_STYLES + SETTINGS_STYLES, body), content_type="text/html")
 
 
 async def branding_page(request: web.Request, bot) -> web.Response:
@@ -362,6 +432,10 @@ async def branding_page(request: web.Request, bot) -> web.Response:
     icon_value = settings.get("embed_icon_url") or ""
     footer_text_value = settings.get("embed_footer_text") or ""
     footer_icon_value = settings.get("embed_footer_icon_url") or ""
+    dash_branding = settings.get("dashboard_branding", {})
+    dash_name_value = dash_branding.get("product_name") or ""
+    dash_logo_value = dash_branding.get("logo_url") or ""
+    dash_accent_value = dash_branding.get("accent_hex") or "#f0a94e"
 
     content = f"""
     <div class="eyebrow">Branding</div>
@@ -395,10 +469,39 @@ async def branding_page(request: web.Request, bot) -> web.Response:
             </div>
         </div>
     </div>
+
+    <div class="eyebrow" style="margin-top:8px;">White-label</div>
+    <h1 style="font-size:20px;">This dashboard's own appearance</h1>
+    <p class="subtitle">
+        Rebrand the dashboard chrome itself (sidebar name, logo, accent color) - useful if you're reselling
+        this bot under your own product name to a client. Leave blank to keep the default look.
+    </p>
+    <div class="group">
+        <div class="field">
+            <label>Product name</label>
+            <div class="field-right"><input type="text" id="dash-brand-name" placeholder="Bot Dashboard" value="{dash_name_value}"></div>
+        </div>
+        <div class="field">
+            <label>Logo URL (sidebar mark)</label>
+            <div class="field-right"><input type="url" id="dash-brand-logo" placeholder="https://..." value="{dash_logo_value}"></div>
+        </div>
+        <div class="field">
+            <label>Accent color</label>
+            <div class="field-right"><input type="color" id="dash-brand-accent" value="{dash_accent_value}"></div>
+        </div>
+        <div class="action-row">
+            <span></span>
+            <div class="field-right">
+                <button class="btn" id="dash-brand-save">Save white-label</button>
+                <span class="status" id="dash-brand-status"></span>
+            </div>
+        </div>
+    </div>
+
     <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
     <script>{BRANDING_JS}</script>
     """
-    body = _sidebar_shell(guild, _icon_url(guild), "branding", content)
+    body = _sidebar_shell(guild, _icon_url(guild), "branding", content, branding=settings.get("dashboard_branding", {}))
     return web.Response(text=_page_shell(f"{guild.name} · Branding", SIDEBAR_STYLES + SETTINGS_STYLES, body), content_type="text/html")
 
 
@@ -409,6 +512,7 @@ async def tickets_page(request: web.Request, bot) -> web.Response:
         return guard
     guild = guard
 
+    settings = await get_guild_settings(guild_id)
     channel_options = _build_options(guild, "channel", None)
     content = f"""
     <div class="eyebrow">Tickets</div>
@@ -426,7 +530,7 @@ async def tickets_page(request: web.Request, bot) -> web.Response:
     <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
     <script>{TICKETS_JS}</script>
     """
-    body = _sidebar_shell(guild, _icon_url(guild), "tickets", content)
+    body = _sidebar_shell(guild, _icon_url(guild), "tickets", content, branding=settings.get("dashboard_branding", {}))
     return web.Response(text=_page_shell(f"{guild.name} · Ticket Panel", SIDEBAR_STYLES + SETTINGS_STYLES, body), content_type="text/html")
 
 
@@ -484,7 +588,7 @@ async def templates_page(request: web.Request, bot) -> web.Response:
     <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
     <script>{TEMPLATES_JS}</script>
     """
-    body = _sidebar_shell(guild, _icon_url(guild), "templates", content)
+    body = _sidebar_shell(guild, _icon_url(guild), "templates", content, branding=settings.get("dashboard_branding", {}))
     return web.Response(
         text=_page_shell(f"{guild.name} · Message Templates", SIDEBAR_STYLES + SETTINGS_STYLES, body),
         content_type="text/html",
@@ -579,7 +683,7 @@ async def divider_page(request: web.Request, bot) -> web.Response:
     <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
     <script>{DIVIDER_JS}</script>
     """
-    body = _sidebar_shell(guild, _icon_url(guild), "divider", content)
+    body = _sidebar_shell(guild, _icon_url(guild), "divider", content, branding=settings.get("dashboard_branding", {}))
     return web.Response(
         text=_page_shell(f"{guild.name} · Auto Divider", SIDEBAR_STYLES + SETTINGS_STYLES, body),
         content_type="text/html",
@@ -830,7 +934,7 @@ async def security_page(request: web.Request, bot) -> web.Response:
     <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
     <script>{SECURITY_JS}</script>
     """
-    body = _sidebar_shell(guild, _icon_url(guild), "security", content)
+    body = _sidebar_shell(guild, _icon_url(guild), "security", content, branding=settings.get("dashboard_branding", {}))
     return web.Response(
         text=_page_shell(f"{guild.name} · Security", SIDEBAR_STYLES + SETTINGS_STYLES, body),
         content_type="text/html",
@@ -956,7 +1060,7 @@ async def leveling_page(request: web.Request, bot) -> web.Response:
     <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
     <script>{LEVELING_JS}</script>
     """
-    body = _sidebar_shell(guild, _icon_url(guild), "leveling", content)
+    body = _sidebar_shell(guild, _icon_url(guild), "leveling", content, branding=settings.get("dashboard_branding", {}))
     return web.Response(
         text=_page_shell(f"{guild.name} · Leveling", SIDEBAR_STYLES + SETTINGS_STYLES, body),
         content_type="text/html",
@@ -1023,7 +1127,7 @@ async def voice_rooms_page(request: web.Request, bot) -> web.Response:
     <script>const API_BASE = '/dashboard/{guild.id}/api';</script>
     <script>{VOICE_ROOMS_JS}</script>
     """
-    body = _sidebar_shell(guild, _icon_url(guild), "voice-rooms", content)
+    body = _sidebar_shell(guild, _icon_url(guild), "voice-rooms", content, branding=settings.get("dashboard_branding", {}))
     return web.Response(
         text=_page_shell(f"{guild.name} · Voice Rooms", SIDEBAR_STYLES + SETTINGS_STYLES, body),
         content_type="text/html",
@@ -1038,6 +1142,7 @@ async def embeds_page(request: web.Request, bot) -> web.Response:
         return guard
     guild = guard
 
+    settings = await get_guild_settings(guild_id)
     channel_options = _build_options(guild, "channel", None)
     content = f"""
     <div class="eyebrow">Embed Builder</div>
@@ -1141,7 +1246,7 @@ async def embeds_page(request: web.Request, bot) -> web.Response:
     <script>const API_BASE = '/dashboard/{guild.id}/api'; const FIELD_LIMITS = {{name: {LIMITS['field_name']}, value: {LIMITS['field_value']}, max_fields: {LIMITS['max_fields']}}};</script>
     <script>{EMBED_BUILDER_JS}</script>
     """
-    body = _sidebar_shell(guild, _icon_url(guild), "embeds", content, wide=True)
+    body = _sidebar_shell(guild, _icon_url(guild), "embeds", content, wide=True, branding=settings.get("dashboard_branding", {}))
     return web.Response(
         text=_page_shell(f"{guild.name} · Embed Builder", SIDEBAR_STYLES + SETTINGS_STYLES + EMBED_BUILDER_STYLES, body),
         content_type="text/html",
@@ -1151,6 +1256,63 @@ async def embeds_page(request: web.Request, bot) -> web.Response:
 # ---------------------------------------------------------
 # JS - one small shared save-pattern per page, plus the larger embed builder script
 # ---------------------------------------------------------
+LOG_HISTORY_JS = """
+function escapeHtml(s) {
+    return (s || '').replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+}
+
+function timeAgo(isoString) {
+    const then = new Date(isoString);
+    const diffSec = Math.floor((Date.now() - then.getTime()) / 1000);
+    if (diffSec < 60) return 'just now';
+    if (diffSec < 3600) return Math.floor(diffSec / 60) + 'm ago';
+    if (diffSec < 86400) return Math.floor(diffSec / 3600) + 'h ago';
+    return Math.floor(diffSec / 86400) + 'd ago';
+}
+
+let lhDebounce = null;
+async function loadLogHistory() {
+    const search = document.getElementById('lh-search').value.trim();
+    const category = document.getElementById('lh-category').value;
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (category) params.set('category', category);
+
+    const container = document.getElementById('lh-results');
+    try {
+        const res = await fetch(API_BASE + '/log-history?' + params.toString());
+        if (!res.ok) throw new Error('failed');
+        const data = await res.json();
+        if (!data.results.length) {
+            container.innerHTML = '<p class="group-hint">No matching events yet.</p>';
+            return;
+        }
+        container.innerHTML = data.results.map(function (r) {
+            const color = '#' + (r.color || 0).toString(16).padStart(6, '0');
+            return '<div class="group" style="border-left:3px solid ' + color + ';">' +
+                '<div class="action-row" style="padding-top:0;">' +
+                    '<strong style="font-size:14px;">' + escapeHtml(r.title || '(untitled)') + '</strong>' +
+                    '<span class="status show ok" style="opacity:1;">' + timeAgo(r.timestamp) + '</span>' +
+                '</div>' +
+                (r.description ? '<p class="group-hint" style="margin-top:-4px;">' + escapeHtml(r.description) + '</p>' : '') +
+                '<p class="group-hint" style="margin:0;">' + escapeHtml(r.category_label) + '</p>' +
+            '</div>';
+        }).join('');
+    } catch (e) {
+        container.innerHTML = '<p class="group-hint">Couldn\\'t load log history.</p>';
+    }
+}
+
+document.getElementById('lh-search').addEventListener('input', function () {
+    clearTimeout(lhDebounce);
+    lhDebounce = setTimeout(loadLogHistory, 300);
+});
+document.getElementById('lh-category').addEventListener('change', loadLogHistory);
+loadLogHistory();
+"""
+
 SETTINGS_JS = """
 document.querySelectorAll('select[data-key]').forEach(function (sel) {
     sel.addEventListener('change', async function () {
@@ -1623,6 +1785,32 @@ brandingSaveBtn.addEventListener('click', async function () {
     }
     brandingSaveBtn.disabled = false;
     setTimeout(function () { statusEl.classList.remove('show'); }, 1500);
+});
+
+const dashBrandSaveBtn = document.getElementById('dash-brand-save');
+dashBrandSaveBtn.addEventListener('click', async function () {
+    const statusEl = document.getElementById('dash-brand-status');
+    const payload = {
+        product_name: document.getElementById('dash-brand-name').value.trim() || null,
+        logo_url: document.getElementById('dash-brand-logo').value.trim() || null,
+        accent_hex: document.getElementById('dash-brand-accent').value,
+    };
+    dashBrandSaveBtn.disabled = true;
+    try {
+        const res = await fetch(API_BASE + '/dashboard-branding', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error('save failed');
+        statusEl.textContent = 'Saved - reloading…';
+        statusEl.className = 'status show ok';
+        setTimeout(function () { location.reload(); }, 500);
+    } catch (e) {
+        statusEl.textContent = 'Error';
+        statusEl.className = 'status show err';
+        dashBrandSaveBtn.disabled = false;
+    }
 });
 """
 

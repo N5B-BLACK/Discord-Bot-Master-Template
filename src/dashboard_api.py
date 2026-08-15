@@ -8,6 +8,8 @@ server-side via _guarded_guild (never trusts the guild_id in the URL alone).
 Page/HTML routes live in dashboard_pages.py instead - see there for those.
 """
 
+import re
+
 import discord
 from aiohttp import web
 
@@ -21,6 +23,7 @@ from utils.db import (
     add_security_whitelist_user,
     delete_embed_draft,
     get_embed_draft,
+    get_event_logs,
     list_embed_drafts,
     remove_auto_divider_channel,
     remove_banned_word,
@@ -37,6 +40,7 @@ from utils.db import (
     set_security_setting,
     update_guild_setting,
     set_voice_rooms_setting,
+    set_dashboard_branding_setting,
 )
 from utils.embed_builder import EmbedValidationError, blank_embed_json, to_discord_embed
 from utils.log_helper import log_setting_change
@@ -614,4 +618,52 @@ async def save_voice_rooms_config(request: web.Request, bot) -> web.Response:
     await set_voice_rooms_setting(guild_id, "category_id", category_id)
     await set_voice_rooms_setting(guild_id, "name_template", name_template)
     await set_voice_rooms_setting(guild_id, "default_user_limit", default_user_limit)
+    return web.json_response({"ok": True})
+
+
+# ---------------------------------------------------------
+# Log History (Phase 4) - read-only search over utils.db.get_event_logs(),
+# populated by utils/log_helper.send_guild_log() and cogs/security.py's
+# _send_security_log(). See dashboard_pages.log_history_page for the UI.
+# ---------------------------------------------------------
+async def get_log_history(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    category = request.query.get("category") or None
+    search = request.query.get("search") or None
+    category_labels = {**SETTINGS_LABELS, "security_log_channel_id": "Security Alerts"}
+
+    docs = await get_event_logs(guild_id, setting_key=category, search=search, limit=50)
+    results = [
+        {
+            "title": d.get("title", ""),
+            "description": d.get("description", ""),
+            "color": d.get("color", 0),
+            "timestamp": d["timestamp"].isoformat() if d.get("timestamp") else None,
+            "category_label": category_labels.get(d.get("setting_key"), d.get("setting_key", "")),
+        }
+        for d in docs
+    ]
+    return web.json_response({"results": results})
+
+
+async def save_dashboard_branding(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    body = await request.json()
+    product_name = (body.get("product_name") or "").strip() or None
+    logo_url = (body.get("logo_url") or "").strip() or None
+    accent_hex = body.get("accent_hex")
+    if accent_hex and not re.fullmatch(r"#[0-9a-fA-F]{6}", accent_hex):
+        return web.json_response({"error": "accent_hex must look like #rrggbb"}, status=400)
+
+    await set_dashboard_branding_setting(guild_id, "product_name", product_name)
+    await set_dashboard_branding_setting(guild_id, "logo_url", logo_url)
+    await set_dashboard_branding_setting(guild_id, "accent_hex", accent_hex)
     return web.json_response({"ok": True})
