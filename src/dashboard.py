@@ -27,6 +27,7 @@ from dashboard_pages import (
     leveling_page,
     log_history_page,
     login,
+    login_start,
     logout,
     logs_page,
     overview_page,
@@ -73,6 +74,7 @@ from dashboard_api import (
 
 def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_get("/login", login)
+    app.router.add_get("/login/start", login_start)
     app.router.add_get("/callback", callback)
     app.router.add_get("/logout", logout)
     app.router.add_get("/dashboard", lambda request: dashboard_home(request, bot))

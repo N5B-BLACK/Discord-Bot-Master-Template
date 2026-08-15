@@ -21,8 +21,10 @@ import config
 from dashboard_core import (
     COOKIE_NAME,
     DISCORD_API,
+    CATEGORY_COLORS,
     EMBED_BUILDER_STYLES,
     GUILD_LIST_STYLES,
+    LANDING_STYLES,
     LOG_GROUPS,
     OVERVIEW_STYLES,
     SETTINGS_GROUPS,
@@ -46,7 +48,10 @@ from utils.message_templates import TEMPLATE_SLOTS
 # ---------------------------------------------------------
 # OAuth routes
 # ---------------------------------------------------------
-async def login(request: web.Request) -> web.Response:
+async def login_start(request: web.Request) -> web.Response:
+    """The actual OAuth kickoff - separated from login() (the marketing/landing
+    page at /login) so landing there doesn't immediately bounce the person to
+    Discord before they've seen anything."""
     params = {
         "client_id": config.DISCORD_CLIENT_ID,
         "redirect_uri": config.REDIRECT_URI,
@@ -54,6 +59,42 @@ async def login(request: web.Request) -> web.Response:
         "scope": "identify guilds",
     }
     return web.HTTPFound(f"{DISCORD_API}/oauth2/authorize?{urlencode(params)}")
+
+
+async def login(request: web.Request) -> web.Response:
+    """Landing page at /login - shown to anyone not signed in yet (first visit,
+    expired session, or after logout), with a feature overview and a single
+    CTA into login_start()."""
+    bot_name = config.BOT_NAME or "Bot Dashboard"
+    features = [
+        ("core", "Core", "Moderation, tickets, welcome messages, and a fully custom embed builder."),
+        ("security", "Security", "Anti-nuke, anti-spam, anti-link, word filtering, raid mode, and more - off until you turn it on."),
+        ("engagement", "Engagement", "XP leveling with rank cards, reaction roles, and level-based role rewards."),
+        ("community", "Community", "Member-owned private voice rooms, created on demand and cleaned up automatically."),
+    ]
+    feature_cards = "\n".join(
+        f"""<div class="landing-feature" style="--rail-color: {CATEGORY_COLORS.get(cat, 'var(--signal)')};">
+            <div class="landing-feature-title">{title}</div>
+            <div class="landing-feature-desc">{desc}</div>
+        </div>"""
+        for cat, title, desc in features
+    )
+
+    content = f"""
+    <div class="topbar">
+        <div class="brand"><span class="brand-dot"></span> {bot_name}</div>
+    </div>
+    <div class="landing-hero">
+        <div class="eyebrow">Discord bot &amp; dashboard</div>
+        <h1>Run a sharper server with {bot_name}</h1>
+        <p class="subtitle">Security, engagement, and community tools in one bot - configured from a dashboard built for admins, not developers.</p>
+        <a class="btn" href="/login/start" style="display:inline-block;text-decoration:none;padding:12px 24px;font-size:14px;">Continue with Discord</a>
+    </div>
+    <div class="landing-features">
+        {feature_cards}
+    </div>
+    """
+    return web.Response(text=_page_shell(f"{bot_name} · Sign in", GUILD_LIST_STYLES + LANDING_STYLES + SETTINGS_STYLES, content), content_type="text/html")
 
 
 async def callback(request: web.Request) -> web.Response:
@@ -94,7 +135,7 @@ async def callback(request: web.Request) -> web.Response:
 
 
 async def logout(request: web.Request) -> web.Response:
-    response = web.HTTPFound("/")
+    response = web.HTTPFound("/login")
     response.del_cookie(COOKIE_NAME)
     return response
 

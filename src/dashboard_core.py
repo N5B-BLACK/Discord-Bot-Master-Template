@@ -400,6 +400,31 @@ GUILD_LIST_STYLES = """
 }
 """
 
+# Landing/marketing page at /login - shown before sign-in, not guild-scoped
+# (no dashboard_branding to apply yet since no guild has been selected).
+LANDING_STYLES = """
+.landing-hero {
+    max-width: 640px; margin: 0 auto; padding: 72px 24px 40px; text-align: center;
+}
+.landing-hero .eyebrow { justify-content: center; display: flex; }
+.landing-hero h1 { font-size: 34px; line-height: 1.15; margin-bottom: 14px; }
+.landing-hero .subtitle { margin: 0 auto 28px; }
+.landing-features {
+    max-width: 900px; margin: 0 auto; padding: 0 24px 80px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;
+}
+.landing-feature {
+    background: var(--panel); border: 1px solid var(--hairline); border-left: 3px solid var(--rail-color, var(--signal));
+    border-radius: var(--radius); padding: 18px 20px;
+}
+.landing-feature-title { font-weight: 600; font-size: 14.5px; margin-bottom: 6px; font-family: var(--font-display); }
+.landing-feature-desc { color: var(--ink-dim); font-size: 12.5px; line-height: 1.55; }
+@media (max-width: 480px) {
+    .landing-hero { padding: 48px 16px 32px; }
+    .landing-hero h1 { font-size: 26px; }
+}
+"""
+
 # Sidebar shell used by every guild-scoped page. Each nav link carries a small
 # category-colored rail (core/security/engagement/community, matching
 # utils/module_registry.py's taxonomy) - the same functional color-coding used
