@@ -59,6 +59,7 @@ COGS = [
     "cogs.reaction_roles",
     "cogs.voice_rooms",
     "cogs.stats",
+    "cogs.license_admin",
 ]
 
 

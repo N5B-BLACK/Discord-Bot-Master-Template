@@ -151,6 +151,16 @@ DEFAULT_SETTINGS = {
         "logo_url": None,       # None = falls back to the guild's own icon
         "accent_hex": None,     # None = falls back to the default amber accent
     },
+    # Phase 5 (business layer) - one bot, two-tier subscription (Free/Pro)
+    # inside it. New guilds start on "free"; Pro is granted manually via
+    # /license set until a payment flow exists. IMPORTANT: this defaults every
+    # NEW guild to "free" tier, which restricts anything module_registry.py
+    # marks tier="pro" (security suite, voice rooms, music) - grant your own
+    # test/dev servers "unlimited" after deploying.
+    "license": {
+        "plan": "free",       # "free" | "pro" | "unlimited" (unlimited always passes every check)
+        "expires_at": None,   # ISO string; None = never expires
+    },
     # Phase 0 addition (Module Registry) - which whole feature modules are on/off
     # per guild. Seeded from utils/module_registry.py so adding a new planned
     # module there automatically appears here with its default state.
@@ -195,6 +205,14 @@ async def set_log_color(guild_id: int, setting_key: str, color_int) -> None:
             {"$set": {f"log_colors.{setting_key}": color_int, "guild_id": guild_id}},
             upsert=True,
         )
+
+
+async def set_license(guild_id: int, plan: str, expires_at: str = None) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$set": {"license.plan": plan, "license.expires_at": expires_at, "guild_id": guild_id}},
+        upsert=True,
+    )
 
 
 async def set_module_enabled(guild_id: int, module_key: str, enabled: bool) -> None:

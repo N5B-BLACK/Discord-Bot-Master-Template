@@ -33,7 +33,7 @@ class Module:
     description_ar: str
     default_enabled: bool     # whether new guilds get this on by default
     built: bool                # False = planned/not implemented yet (roadmap placeholder)
-    tier: str = "core"        # reserved for future licensing (core/pro/premium) - not enforced yet
+    tier: str = "core"        # "core" (free, unrestricted) or "pro" (requires the Pro plan)
 
 
 # ---------------------------------------------------------------------------
@@ -48,30 +48,30 @@ MODULES: list[Module] = [
     Module("tickets", "التذاكر", "core", "نظام تذاكر دعم كامل", True, True),
     Module("ai_chat", "الدردشة الذكية", "core", "دردشة AI عبر OpenRouter", True, True),
     Module("logs", "اللوقز", "core", "لوقز شاملة (34 نوع حدث)", True, True),
-    Module("music", "الموسيقى", "core", "تشغيل موسيقى بلوحة تحكم", True, True),
+    Module("music", "الموسيقى", "core", "تشغيل موسيقى بلوحة تحكم", True, True, "pro"),
     Module("trap_channel", "قناة الفخ", "core", "حظر تلقائي لمن يكتب بقناة محددة", False, True),
     Module("auto_divider", "الفاصل التلقائي", "core", "صورة فاصلة تلقائية بعد كل رسالة", False, True),
     Module("embed_builder", "بناء Embeds", "core", "محرر embeds مخصص بالكامل", True, True),
 
     # --- Phase 1: Security suite ---
-    Module("anti_nuke", "الحماية من التخريب", "security", "كشف حذف قنوات/رولات جماعي وتجميد الصلاحيات", False, True),
-    Module("anti_spam", "منع السبام", "security", "كشف وإيقاف السبام تلقائياً", False, True),
-    Module("anti_link", "منع الروابط", "security", "حظر روابط غير مسموحة مع استثناءات", False, True),
-    Module("word_filter", "فلتر الكلمات", "security", "قائمة كلمات محظورة قابلة للتخصيص", False, True),
-    Module("anti_webhook", "حماية الويبهوكس", "security", "منع إنشاء ويبهوكس غير مصرح", False, True),
-    Module("raid_mode", "وضع الهجوم", "security", "قفل مؤقت للسيرفر عند هجوم أعضاء وهميين", False, True),
-    Module("server_backup", "نسخ احتياطي", "security", "نسخ/استعادة إعدادات السيرفر", False, False),
+    Module("anti_nuke", "الحماية من التخريب", "security", "كشف حذف قنوات/رولات جماعي وتجميد الصلاحيات", False, True, "pro"),
+    Module("anti_spam", "منع السبام", "security", "كشف وإيقاف السبام تلقائياً", False, True, "pro"),
+    Module("anti_link", "منع الروابط", "security", "حظر روابط غير مسموحة مع استثناءات", False, True, "pro"),
+    Module("word_filter", "فلتر الكلمات", "security", "قائمة كلمات محظورة قابلة للتخصيص", False, True, "pro"),
+    Module("anti_webhook", "حماية الويبهوكس", "security", "منع إنشاء ويبهوكس غير مصرح", False, True, "pro"),
+    Module("raid_mode", "وضع الهجوم", "security", "قفل مؤقت للسيرفر عند هجوم أعضاء وهميين", False, True, "pro"),
+    Module("server_backup", "نسخ احتياطي", "security", "نسخ/استعادة إعدادات السيرفر", False, False, "pro"),
 
     # --- Phase 2: Engagement ---
-    Module("leveling", "نظام المستويات", "engagement", "XP + رانك كارد بصورة", False, True),
-    Module("reaction_roles", "الرولات بالتفاعل", "engagement", "رول تلقائي عبر ايموجي", False, True),
-    Module("starboard", "ستاربورد", "engagement", "أرشفة أفضل الرسائل بنجمة", False, False),
-    Module("giveaways", "السحوبات", "engagement", "سحوبات جوائز بزر", False, False),
-    Module("autoresponder", "الردود التلقائية", "engagement", "رد تلقائي على كلمات محددة", False, False),
+    Module("leveling", "نظام المستويات", "engagement", "XP + رانك كارد بصورة", False, True, "core"),
+    Module("reaction_roles", "الرولات بالتفاعل", "engagement", "رول تلقائي عبر ايموجي", False, True, "core"),
+    Module("starboard", "ستاربورد", "engagement", "أرشفة أفضل الرسائل بنجمة", False, False, "pro"),
+    Module("giveaways", "السحوبات", "engagement", "سحوبات جوائز بزر", False, False, "pro"),
+    Module("autoresponder", "الردود التلقائية", "engagement", "رد تلقائي على كلمات محددة", False, False, "pro"),
 
     # --- Phase 3: Community / voice ---
-    Module("voice_rooms", "الرومات الخاصة", "community", "رومات صوتية خاصة يتحكم فيها العضو", False, True),
-    Module("invite_tracking", "تتبع الدعوات", "community", "من دعا مين + إحصائيات", False, False),
+    Module("voice_rooms", "الرومات الخاصة", "community", "رومات صوتية خاصة يتحكم فيها العضو", False, True, "pro"),
+    Module("invite_tracking", "تتبع الدعوات", "community", "من دعا مين + إحصائيات", False, False, "pro"),
 ]
 
 

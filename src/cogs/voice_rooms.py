@@ -26,6 +26,7 @@ from utils.db import (
     get_voice_room,
     set_voice_room_owner,
 )
+from utils.licensing import is_module_available
 
 
 class VoiceRooms(commands.Cog):
@@ -41,7 +42,7 @@ class VoiceRooms(commands.Cog):
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         settings = await get_guild_settings(member.guild.id)
         conf = settings.get("voice_rooms", {})
-        if not conf.get("enabled"):
+        if not conf.get("enabled") or not is_module_available(settings, "voice_rooms"):
             return
 
         hub_id = conf.get("hub_channel_id")

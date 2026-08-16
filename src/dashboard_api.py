@@ -24,6 +24,7 @@ from utils.db import (
     delete_embed_draft,
     get_embed_draft,
     get_event_logs,
+    get_guild_settings,
     list_embed_drafts,
     remove_auto_divider_channel,
     remove_banned_word,
@@ -43,6 +44,7 @@ from utils.db import (
     set_dashboard_branding_setting,
 )
 from utils.embed_builder import EmbedValidationError, blank_embed_json, to_discord_embed
+from utils.licensing import is_module_available
 from utils.log_helper import log_setting_change
 from utils.message_templates import TEMPLATE_SLOT_KEYS
 
@@ -330,7 +332,12 @@ async def save_security_toggle(request: web.Request, bot) -> web.Response:
     system = body.get("system")
     if system not in _SECURITY_SYSTEMS:
         return web.json_response({"error": "invalid system"}, status=400)
-    await set_security_setting(guild_id, f"{system}.enabled", bool(body.get("enabled")))
+    enabled = bool(body.get("enabled"))
+    if enabled:
+        settings = await get_guild_settings(guild_id)
+        if not is_module_available(settings, system):
+            return web.json_response({"error": "This feature requires a Pro plan or higher."}, status=402)
+    await set_security_setting(guild_id, f"{system}.enabled", enabled)
     return web.json_response({"ok": True})
 
 
@@ -507,7 +514,12 @@ async def save_leveling_toggle(request: web.Request, bot) -> web.Response:
         return guard
 
     body = await request.json()
-    await set_leveling_setting(guild_id, "enabled", bool(body.get("enabled")))
+    enabled = bool(body.get("enabled"))
+    if enabled:
+        settings = await get_guild_settings(guild_id)
+        if not is_module_available(settings, "leveling"):
+            return web.json_response({"error": "This feature requires a Pro plan or higher."}, status=402)
+    await set_leveling_setting(guild_id, "enabled", enabled)
     return web.json_response({"ok": True})
 
 
@@ -592,7 +604,12 @@ async def save_voice_rooms_toggle(request: web.Request, bot) -> web.Response:
         return guard
 
     body = await request.json()
-    await set_voice_rooms_setting(guild_id, "enabled", bool(body.get("enabled")))
+    enabled = bool(body.get("enabled"))
+    if enabled:
+        settings = await get_guild_settings(guild_id)
+        if not is_module_available(settings, "voice_rooms"):
+            return web.json_response({"error": "This feature requires a Pro plan."}, status=402)
+    await set_voice_rooms_setting(guild_id, "enabled", enabled)
     return web.json_response({"ok": True})
 
 

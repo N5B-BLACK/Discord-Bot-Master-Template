@@ -40,6 +40,7 @@ from utils.db import (
     set_security_setting,
 )
 from utils.embed_helper import build_embed
+from utils.licensing import is_module_available
 from utils.log_helper import get_recent_audit_entry, send_guild_log
 
 URL_PATTERN = re.compile(r"https?://([^\s/]+)", re.IGNORECASE)
@@ -123,7 +124,7 @@ class Security(commands.Cog):
     async def _handle_nuke_event(self, guild: discord.Guild, action: discord.AuditLogAction, target_id: int, label: str):
         settings = await get_guild_settings(guild.id)
         conf = settings.get("security", {}).get("anti_nuke", {})
-        if not conf.get("enabled"):
+        if not conf.get("enabled") or not is_module_available(settings, "anti_nuke"):
             return
 
         entry = await get_recent_audit_entry(guild, action, target_id)
@@ -180,7 +181,7 @@ class Security(commands.Cog):
         guild = channel.guild
         settings = await get_guild_settings(guild.id)
         conf = settings.get("security", {}).get("anti_webhook", {})
-        if not conf.get("enabled"):
+        if not conf.get("enabled") or not is_module_available(settings, "anti_webhook"):
             return
 
         # webhook_create's audit-log target is the webhook itself (unknown ahead of
@@ -234,7 +235,7 @@ class Security(commands.Cog):
         guild = member.guild
         settings = await get_guild_settings(guild.id)
         conf = settings.get("security", {}).get("raid_mode", {})
-        if not conf.get("enabled"):
+        if not conf.get("enabled") or not is_module_available(settings, "raid_mode"):
             return
 
         now = time.time()
@@ -332,7 +333,7 @@ class Security(commands.Cog):
 
     async def _check_word_filter(self, message: discord.Message, settings: dict, security: dict) -> bool:
         conf = security.get("word_filter", {})
-        if not conf.get("enabled"):
+        if not conf.get("enabled") or not is_module_available(settings, "word_filter"):
             return False
         banned = conf.get("banned_words", [])
         if not banned:
@@ -359,7 +360,7 @@ class Security(commands.Cog):
 
     async def _check_anti_link(self, message: discord.Message, settings: dict, security: dict) -> bool:
         conf = security.get("anti_link", {})
-        if not conf.get("enabled"):
+        if not conf.get("enabled") or not is_module_available(settings, "anti_link"):
             return False
         if message.channel.id in conf.get("whitelist_channel_ids", []):
             return False
@@ -387,7 +388,7 @@ class Security(commands.Cog):
 
     async def _check_anti_spam(self, message: discord.Message, settings: dict, security: dict) -> None:
         conf = security.get("anti_spam", {})
-        if not conf.get("enabled"):
+        if not conf.get("enabled") or not is_module_available(settings, "anti_spam"):
             return
 
         now = time.time()

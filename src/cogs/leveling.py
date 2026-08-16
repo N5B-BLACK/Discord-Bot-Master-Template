@@ -29,6 +29,7 @@ from utils.db import (
 )
 from utils.embed_helper import build_embed
 from utils.leveling_math import level_from_xp, progress_in_level
+from utils.licensing import is_module_available
 from utils.rank_card import generate_rank_card
 
 
@@ -55,7 +56,7 @@ class Leveling(commands.Cog):
 
         settings = await get_guild_settings(message.guild.id)
         conf = settings.get("leveling", {})
-        if not conf.get("enabled"):
+        if not conf.get("enabled") or not is_module_available(settings, "leveling"):
             return
         if message.channel.id in conf.get("ignored_channel_ids", []):
             return

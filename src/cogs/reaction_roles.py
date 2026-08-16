@@ -16,11 +16,13 @@ from utils.db import (
     add_reaction_role_mapping,
     create_reaction_role_message,
     delete_reaction_role_message,
+    get_guild_settings,
     get_reaction_role_message,
     list_reaction_role_messages,
     remove_reaction_role_mapping,
 )
 from utils.embed_helper import build_embed
+from utils.licensing import is_module_available
 
 
 class ReactionRoles(commands.Cog):
@@ -43,6 +45,10 @@ class ReactionRoles(commands.Cog):
 
         doc = await get_reaction_role_message(payload.message_id)
         if doc is None:
+            return
+
+        settings = await get_guild_settings(payload.guild_id)
+        if not is_module_available(settings, "reaction_roles"):
             return
 
         emoji_key = str(payload.emoji)
@@ -72,6 +78,13 @@ class ReactionRoles(commands.Cog):
     @reaction_roles_group.command(name="create", description="Post a new reaction-role panel in a channel")
     @app_commands.checks.has_permissions(administrator=True)
     async def create(self, interaction: discord.Interaction, channel: discord.TextChannel, title: str, description: str = None):
+        settings = await get_guild_settings(interaction.guild_id)
+        if not is_module_available(settings, "reaction_roles"):
+            await interaction.response.send_message(
+                "Reaction Roles isn't available on this server's current plan.", ephemeral=True
+            )
+            return
+
         embed = await build_embed(interaction.guild_id, title=title, description=description or "React below to get a role.")
         message = await channel.send(embed=embed)
         await create_reaction_role_message(interaction.guild_id, channel.id, message.id)
