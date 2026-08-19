@@ -18,6 +18,7 @@ unchanged, so no other file needed to change.
 from aiohttp import web
 
 from dashboard_pages import (
+    admin_page,
     branding_page,
     callback,
     dashboard_home,
@@ -34,6 +35,7 @@ from dashboard_pages import (
     security_page,
     templates_page,
     tickets_page,
+    upgrade_page,
     voice_rooms_page,
 )
 from dashboard_api import (
@@ -69,6 +71,9 @@ from dashboard_api import (
     save_template_slot,
     save_voice_rooms_config,
     save_voice_rooms_toggle,
+    create_checkout_session_route,
+    create_portal_session_route,
+    paddle_webhook,
 )
 
 
@@ -78,9 +83,11 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_get("/callback", callback)
     app.router.add_get("/logout", logout)
     app.router.add_get("/dashboard", lambda request: dashboard_home(request, bot))
+    app.router.add_get("/admin", lambda request: admin_page(request, bot))
 
     app.router.add_get("/dashboard/{guild_id}", lambda request: overview_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/settings", lambda request: guild_settings_page(request, bot))
+    app.router.add_get("/dashboard/{guild_id}/upgrade", lambda request: upgrade_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/security", lambda request: security_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/leveling", lambda request: leveling_page(request, bot))
     app.router.add_get("/dashboard/{guild_id}/voice-rooms", lambda request: voice_rooms_page(request, bot))
@@ -127,3 +134,8 @@ def setup_dashboard_routes(app: web.Application, bot):
 
     app.router.add_post("/dashboard/{guild_id}/api/voice-rooms/toggle", lambda request: save_voice_rooms_toggle(request, bot))
     app.router.add_post("/dashboard/{guild_id}/api/voice-rooms/config", lambda request: save_voice_rooms_config(request, bot))
+
+    app.router.add_post("/dashboard/{guild_id}/api/billing/create-checkout-session", lambda request: create_checkout_session_route(request, bot))
+    app.router.add_post("/dashboard/{guild_id}/api/billing/create-portal-session", lambda request: create_portal_session_route(request, bot))
+    # Not guild-scoped - Paddle calls this directly, authenticated by webhook signature instead of a session cookie.
+    app.router.add_post("/webhooks/paddle", paddle_webhook)

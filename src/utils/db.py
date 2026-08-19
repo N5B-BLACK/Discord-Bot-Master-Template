@@ -160,6 +160,9 @@ DEFAULT_SETTINGS = {
     "license": {
         "plan": "free",       # "free" | "pro" | "unlimited" (unlimited always passes every check)
         "expires_at": None,   # ISO string; None = never expires
+        "paddle_customer_id": None,
+        "paddle_subscription_id": None,
+        "payment_issue": False,  # True while Paddle is retrying a failed payment (subscription still active, shown as a warning)
     },
     # Phase 0 addition (Module Registry) - which whole feature modules are on/off
     # per guild. Seeded from utils/module_registry.py so adding a new planned
@@ -213,6 +216,45 @@ async def set_license(guild_id: int, plan: str, expires_at: str = None) -> None:
         {"$set": {"license.plan": plan, "license.expires_at": expires_at, "guild_id": guild_id}},
         upsert=True,
     )
+
+
+async def set_paddle_ids(guild_id: int, customer_id: str, subscription_id: str) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$set": {
+            "license.paddle_customer_id": customer_id,
+            "license.paddle_subscription_id": subscription_id,
+            "guild_id": guild_id,
+        }},
+        upsert=True,
+    )
+
+
+async def set_payment_issue(guild_id: int, has_issue: bool) -> None:
+    await _guild_settings.update_one(
+        {"guild_id": guild_id},
+        {"$set": {"license.payment_issue": has_issue, "guild_id": guild_id}},
+    )
+
+
+async def get_guild_by_paddle_subscription(subscription_id: str) -> dict | None:
+    """Used by the Paddle webhook handler - a subscription lifecycle event only
+    tells us the subscription ID, not the guild, so this is the reverse lookup."""
+    return await _guild_settings.find_one({"license.paddle_subscription_id": subscription_id})
+
+
+async def list_licensed_guilds() -> list:
+    """Every guild with a non-default license state (plan != free, has Paddle
+    IDs, or has a payment issue) - powers the owner-only /admin page. Guilds
+    that have never touched billing at all aren't worth listing."""
+    cursor = _guild_settings.find({
+        "$or": [
+            {"license.plan": {"$in": ["pro", "unlimited"]}},
+            {"license.paddle_customer_id": {"$ne": None}},
+            {"license.payment_issue": True},
+        ]
+    })
+    return await cursor.to_list(length=1000)
 
 
 async def set_module_enabled(guild_id: int, module_key: str, enabled: bool) -> None:

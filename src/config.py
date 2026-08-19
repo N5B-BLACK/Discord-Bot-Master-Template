@@ -51,6 +51,19 @@ REDIRECT_URI = os.getenv("REDIRECT_URI")
 # used to build "open in dashboard" links from within Discord (e.g. /embed builder).
 DASHBOARD_BASE_URL = REDIRECT_URI.rsplit("/callback", 1)[0] if REDIRECT_URI else None
 
+# ---------------------------------------------------------
+# Billing (Paddle subscriptions - Phase 5)
+# ---------------------------------------------------------
+PADDLE_API_KEY = os.getenv("PADDLE_API_KEY")
+PADDLE_WEBHOOK_SECRET = os.getenv("PADDLE_WEBHOOK_SECRET")
+PADDLE_PRICE_ID_PRO = os.getenv("PADDLE_PRICE_ID_PRO")  # the Paddle Price ID (pri_...) for the Pro monthly subscription
+PADDLE_CLIENT_TOKEN = os.getenv("PADDLE_CLIENT_TOKEN")  # client-side token (starts test_/live_), used by Paddle.js in the browser
+PADDLE_ENVIRONMENT = os.getenv("PADDLE_ENVIRONMENT", "production")  # "production" or "sandbox"
+# Display-only - what the upgrade page shows. Change this freely; it does NOT
+# affect what Paddle actually charges (that's controlled by PADDLE_PRICE_ID_PRO
+# in your Paddle Dashboard) - keep the two in sync manually if you change price.
+PRO_PRICE_DISPLAY = os.getenv("PRO_PRICE_DISPLAY", "$9.99/mo")
+
 # Optional: base64-encoded Netscape-format cookies.txt exported from a real, logged-in
 # YouTube session - improves music playback reliability on cloud hosts (see
 # utils/music_source.py's module docstring). Entirely optional; everything works

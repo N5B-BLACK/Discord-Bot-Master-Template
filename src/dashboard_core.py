@@ -129,6 +129,7 @@ CATEGORY_COLORS = {
 NAV_ITEMS = [
     ("", "Overview", "overview", "core"),
     ("settings", "Server Settings", "settings", "core"),
+    ("upgrade", "Upgrade to Pro", "upgrade", "core"),
     ("security", "Security", "security", "security"),
     ("leveling", "Leveling", "leveling", "engagement"),
     ("voice-rooms", "Voice Rooms", "voice-rooms", "community"),

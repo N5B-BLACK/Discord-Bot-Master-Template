@@ -8,12 +8,15 @@ server-side via _guarded_guild (never trusts the guild_id in the URL alone).
 Page/HTML routes live in dashboard_pages.py instead - see there for those.
 """
 
+import json
 import re
 
 import discord
 from aiohttp import web
 
-from dashboard_core import LOG_COLOR_KEYS, SETTINGS_LABELS, VALID_KEYS, _guarded_guild, _read_session
+import config
+import utils.paddle_billing as paddle_billing
+from dashboard_core import LOG_COLOR_KEYS, SETTINGS_LABELS, VALID_KEYS, _guarded_guild, _read_session, logger
 from utils.db import (
     add_auto_divider_channel,
     add_banned_word,
@@ -684,3 +687,69 @@ async def save_dashboard_branding(request: web.Request, bot) -> web.Response:
     await set_dashboard_branding_setting(guild_id, "logo_url", logo_url)
     await set_dashboard_branding_setting(guild_id, "accent_hex", accent_hex)
     return web.json_response({"ok": True})
+
+
+# ---------------------------------------------------------
+# Billing (Phase 5) - Paddle Transaction creation + Customer Portal. The
+# actual license activation happens via the webhook (see paddle_webhook()
+# below), NOT here - create_checkout_session_route() only creates a
+# Transaction for Paddle.js to open client-side (see upgrade_page's
+# UPGRADE_JS - Paddle has no hosted-checkout-domain redirect like Stripe).
+# ---------------------------------------------------------
+async def create_checkout_session_route(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    if not paddle_billing.is_configured():
+        return web.json_response({"error": "Billing isn't configured on this deployment."}, status=503)
+
+    try:
+        transaction_id = await paddle_billing.create_transaction(guild_id=guild_id, guild_name=guard.name)
+    except paddle_billing.PaddleAPIError as e:
+        return web.json_response({"error": str(e)}, status=502)
+    return web.json_response({"transaction_id": transaction_id})
+
+
+async def create_portal_session_route(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id, json_errors=True)
+    if not isinstance(guard, discord.Guild):
+        return guard
+
+    settings = await get_guild_settings(guild_id)
+    customer_id = settings.get("license", {}).get("paddle_customer_id")
+    if not customer_id:
+        return web.json_response({"error": "No billing account found for this server."}, status=404)
+
+    try:
+        url = await paddle_billing.create_customer_portal_session(customer_id)
+    except paddle_billing.PaddleAPIError as e:
+        return web.json_response({"error": str(e)}, status=502)
+    if not url:
+        return web.json_response({"error": "Paddle didn't return a portal URL."}, status=502)
+    return web.json_response({"url": url})
+
+
+async def paddle_webhook(request: web.Request) -> web.Response:
+    """Not guild-scoped - Paddle posts here directly with its own signature,
+    verified against PADDLE_WEBHOOK_SECRET rather than our session cookie."""
+    payload = await request.read()
+    sig_header = request.headers.get("Paddle-Signature", "")
+    if not paddle_billing.verify_signature(payload, sig_header, config.PADDLE_WEBHOOK_SECRET):
+        return web.Response(status=400, text="invalid signature")
+
+    try:
+        event = json.loads(payload)
+    except ValueError:
+        return web.Response(status=400, text="invalid json")
+
+    try:
+        await paddle_billing.handle_event(event)
+    except Exception:
+        logger.exception(f"Error handling Paddle webhook event {event.get('event_type', '?')}")
+        # Still return 200 - Paddle will retry on non-2xx, and a bug in our
+        # handling of one event type shouldn't cause Paddle to keep hammering
+        # this endpoint indefinitely. Errors are logged for manual follow-up.
+    return web.Response(status=200, text="ok")

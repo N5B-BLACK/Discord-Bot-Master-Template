@@ -18,6 +18,7 @@ from aiohttp import web
 from urllib.parse import urlencode
 
 import config
+import utils.paddle_billing as paddle_billing
 from dashboard_core import (
     COOKIE_NAME,
     DISCORD_API,
@@ -40,7 +41,7 @@ from dashboard_core import (
     _write_session,
     logger,
 )
-from utils.db import DEFAULT_SETTINGS, get_daily_stats, get_guild_settings, list_embed_drafts
+from utils.db import DEFAULT_SETTINGS, get_daily_stats, get_guild_settings, list_embed_drafts, list_licensed_guilds
 from utils.chart_svg import bar_chart_svg, line_chart_svg
 from utils.embed_builder import LIMITS
 from utils.message_templates import TEMPLATE_SLOTS
@@ -199,6 +200,77 @@ async def dashboard_home(request: web.Request, bot) -> web.Response:
     return web.Response(text=_page_shell("Bot Dashboard", GUILD_LIST_STYLES, body), content_type="text/html")
 
 
+def _is_bot_owner(session_data: dict, bot) -> bool:
+    user = session_data.get("user")
+    if not user:
+        return False
+    user_id = str(user.get("id"))
+    if bot.owner_id is not None and str(bot.owner_id) == user_id:
+        return True
+    if bot.owner_ids:
+        return user_id in {str(x) for x in bot.owner_ids}
+    return False
+
+
+async def admin_page(request: web.Request, bot) -> web.Response:
+    """Owner-only overview of every guild with a non-default license state -
+    who's on Pro, who has a payment issue, who's on a manually-granted
+    unlimited plan. Not linked from anywhere in the regular per-guild
+    dashboard; only reachable by the bot owner navigating to /admin directly."""
+    session_data = _read_session(request)
+    if not _is_bot_owner(session_data, bot):
+        return web.Response(text="Not found.", status=404)
+
+    docs = await list_licensed_guilds()
+    rows = ""
+    for doc in docs:
+        guild = bot.get_guild(doc["guild_id"])
+        name = guild.name if guild else f"Unknown ({doc['guild_id']})"
+        license_info = doc.get("license", {})
+        plan = license_info.get("plan", "free")
+        payment_issue = license_info.get("payment_issue", False)
+        has_paddle = bool(license_info.get("paddle_subscription_id"))
+
+        plan_badge = {"pro": "⭐ Pro", "unlimited": "♾️ Unlimited", "free": "Free"}.get(plan, plan)
+        issue_badge = ' <span style="color: var(--danger);">⚠ payment issue</span>' if payment_issue else ""
+        source_badge = " (Paddle)" if has_paddle else " (manual)" if plan != "free" else ""
+
+        rows += f"""
+        <div class="field">
+            <label>{name} <span class="group-hint" style="margin:0;">({doc['guild_id']})</span></label>
+            <div class="field-right">{plan_badge}{source_badge}{issue_badge}</div>
+        </div>
+        """
+
+    pro_count = sum(1 for d in docs if d.get("license", {}).get("plan") == "pro")
+    issue_count = sum(1 for d in docs if d.get("license", {}).get("payment_issue"))
+
+    content = f"""
+    <div class="topbar">
+        <div class="brand"><span class="brand-dot"></span> Bot Dashboard · Admin</div>
+        <div class="spacer"></div>
+        <a class="link-btn" href="/dashboard">Back to dashboard</a>
+    </div>
+    <div class="container" style="max-width: 820px;">
+        <div class="eyebrow">Owner only</div>
+        <h1>Billing overview</h1>
+        <div class="stat-grid">
+            <div class="stat-card"><div class="stat-value">{pro_count}</div><div class="stat-label">Guilds on Pro</div></div>
+            <div class="stat-card"><div class="stat-value">{issue_count}</div><div class="stat-label">Payment issues</div></div>
+            <div class="stat-card"><div class="stat-value">{len(docs)}</div><div class="stat-label">Total licensed guilds</div></div>
+        </div>
+        <div class="group">
+            <h2>Guilds</h2>
+            {rows or '<p class="group-hint">No guild has touched billing yet.</p>'}
+        </div>
+    </div>
+    """
+    return web.Response(
+        text=_page_shell("Admin · Billing", GUILD_LIST_STYLES + SETTINGS_STYLES + OVERVIEW_STYLES, content),
+        content_type="text/html",
+    )
+
+
 def _build_options(guild: discord.Guild, kind: str, current_value):
     """Builds <option> tags for a role / text-channel / voice-channel / category
     select, filtering out @everyone / managed (bot, booster, integration) roles,
@@ -305,6 +377,83 @@ async def overview_page(request: web.Request, bot) -> web.Response:
     """
     body = _sidebar_shell(guild, _icon_url(guild), "overview", content, branding=settings.get("dashboard_branding", {}))
     return web.Response(text=_page_shell(f"{guild.name} · Overview", SIDEBAR_STYLES + OVERVIEW_STYLES, body), content_type="text/html")
+
+
+async def upgrade_page(request: web.Request, bot) -> web.Response:
+    guild_id = int(request.match_info["guild_id"])
+    access_token, guard = await _guarded_guild(request, bot, guild_id)
+    if not isinstance(guard, discord.Guild):
+        return guard
+    guild = guard
+
+    settings = await get_guild_settings(guild_id)
+    license_info = settings.get("license", {})
+    plan = license_info.get("plan", "free")
+    payment_issue = license_info.get("payment_issue", False)
+    has_subscription = bool(license_info.get("paddle_subscription_id"))
+    paddle_ready = paddle_billing.is_configured() and bool(config.PADDLE_CLIENT_TOKEN)
+
+    issue_banner = ""
+    if payment_issue:
+        issue_banner = """
+        <div class="group" style="border-color: var(--danger); border-left: 3px solid var(--danger);">
+            <h2 style="color: var(--danger);">Payment issue</h2>
+            <p class="group-hint" style="margin-bottom: 0;">
+                Paddle couldn't process your last payment and is retrying automatically.
+                Pro features stay active while it retries - use "Manage billing" below to update your card.
+            </p>
+        </div>
+        """
+
+    if plan in ("pro", "unlimited"):
+        status_html = f"""
+        {issue_banner}
+        <div class="group">
+            <h2>You're on Pro{"" if plan == "pro" else " (internal)"}</h2>
+            <p class="group-hint">Every Pro feature is unlocked for this server.</p>
+            {'<div class="action-row"><span></span><div class="field-right"><button class="btn secondary" id="manage-billing-btn">Manage billing</button><span class="status" id="upgrade-status"></span></div></div>' if has_subscription else ''}
+        </div>
+        """
+    else:
+        price = config.PRO_PRICE_DISPLAY
+        status_html = f"""
+        <div class="landing-features" style="padding:0 0 4px;margin:0;">
+            <div class="landing-feature" style="--rail-color: var(--cat-core);">
+                <div class="landing-feature-title">Free - current plan</div>
+                <div class="landing-feature-desc">Moderation, tickets, welcome, embed builder, logs, AI chat, full leveling with role rewards, and reaction roles.</div>
+            </div>
+            <div class="landing-feature" style="--rail-color: var(--signal); border-width: 2px;">
+                <div class="landing-feature-title">Pro - {price}</div>
+                <div class="landing-feature-desc">Everything in Free, plus the full security suite (anti-nuke, anti-spam, anti-link, word filter, anti-webhook, raid mode), private voice rooms, music, and white-label dashboard branding.</div>
+            </div>
+        </div>
+        <div class="group">
+            <div class="action-row">
+                <span></span>
+                <div class="field-right">
+                    <button class="btn" id="upgrade-btn" {"disabled" if not paddle_ready else ""}>Upgrade to Pro - {price}</button>
+                    <span class="status" id="upgrade-status"></span>
+                </div>
+            </div>
+            {'<p class="group-hint">Billing isn\'t configured on this deployment yet.</p>' if not paddle_ready else ''}
+        </div>
+        """
+
+    content = f"""
+    <div class="eyebrow">Billing</div>
+    <h1>Upgrade to Pro</h1>
+    <p class="subtitle">Secure checkout via Paddle. Cancel anytime - Pro features stay active until the end of the billing period.</p>
+    {status_html}
+    <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+    <script>
+        const API_BASE = '/dashboard/{guild.id}/api';
+        const PADDLE_CLIENT_TOKEN = {config.PADDLE_CLIENT_TOKEN!r};
+        const PADDLE_ENV = {config.PADDLE_ENVIRONMENT!r};
+    </script>
+    <script>{UPGRADE_JS}</script>
+    """
+    body = _sidebar_shell(guild, _icon_url(guild), "upgrade", content, branding=settings.get("dashboard_branding", {}))
+    return web.Response(text=_page_shell(f"{guild.name} · Upgrade", SIDEBAR_STYLES + SETTINGS_STYLES + LANDING_STYLES, body), content_type="text/html")
 
 
 async def guild_settings_page(request: web.Request, bot) -> web.Response:
@@ -1297,6 +1446,65 @@ async def embeds_page(request: web.Request, bot) -> web.Response:
 # ---------------------------------------------------------
 # JS - one small shared save-pattern per page, plus the larger embed builder script
 # ---------------------------------------------------------
+UPGRADE_JS = """
+if (PADDLE_CLIENT_TOKEN) {
+    Paddle.Environment.set(PADDLE_ENV === 'sandbox' ? 'sandbox' : 'production');
+    Paddle.Initialize({
+        token: PADDLE_CLIENT_TOKEN,
+        eventCallback: function (evt) {
+            if (evt.name === 'checkout.completed') {
+                // Actual license activation happens via the webhook (server-side,
+                // reliable even if this tab closes) - this just improves perceived
+                // responsiveness by refreshing the page once Paddle confirms locally.
+                setTimeout(function () { window.location.href = window.location.pathname; }, 1200);
+            }
+        },
+    });
+}
+
+const upgradeBtn = document.getElementById('upgrade-btn');
+if (upgradeBtn) {
+    upgradeBtn.addEventListener('click', async function () {
+        const statusEl = document.getElementById('upgrade-status');
+        upgradeBtn.disabled = true;
+        statusEl.textContent = 'Opening checkout…';
+        statusEl.className = 'status show ok';
+        try {
+            const res = await fetch(API_BASE + '/billing/create-checkout-session', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok || !data.transaction_id) throw new Error(data.error || 'failed');
+            Paddle.Checkout.open({ transactionId: data.transaction_id });
+            statusEl.classList.remove('show');
+            upgradeBtn.disabled = false;
+        } catch (e) {
+            statusEl.textContent = 'Error - try again';
+            statusEl.className = 'status show err';
+            upgradeBtn.disabled = false;
+        }
+    });
+}
+
+const manageBillingBtn = document.getElementById('manage-billing-btn');
+if (manageBillingBtn) {
+    manageBillingBtn.addEventListener('click', async function () {
+        const statusEl = document.getElementById('upgrade-status');
+        manageBillingBtn.disabled = true;
+        statusEl.textContent = 'Redirecting to Paddle…';
+        statusEl.className = 'status show ok';
+        try {
+            const res = await fetch(API_BASE + '/billing/create-portal-session', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok || !data.url) throw new Error(data.error || 'failed');
+            window.location.href = data.url;
+        } catch (e) {
+            statusEl.textContent = 'Error - try again';
+            statusEl.className = 'status show err';
+            manageBillingBtn.disabled = false;
+        }
+    });
+}
+"""
+
 LOG_HISTORY_JS = """
 function escapeHtml(s) {
     return (s || '').replace(/[&<>"']/g, function (c) {
