@@ -426,6 +426,15 @@ LANDING_STYLES = """
 }
 """
 
+# /terms, /privacy, /refund - plain readable legal documents, not app UI.
+LEGAL_STYLES = """
+.legal-body { color: var(--ink-dim); font-size: 14px; line-height: 1.7; padding-bottom: 60px; }
+.legal-body h2 { color: var(--ink); font-family: var(--font-display); font-size: 16px; margin: 28px 0 10px; }
+.legal-body p { margin: 0 0 14px; }
+.legal-body a { color: var(--signal); }
+.legal-body em { color: var(--ink-faint); }
+"""
+
 # Sidebar shell used by every guild-scoped page. Each nav link carries a small
 # category-colored rail (core/security/engagement/community, matching
 # utils/module_registry.py's taxonomy) - the same functional color-coding used

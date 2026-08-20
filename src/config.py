@@ -35,6 +35,7 @@ AI_MODEL = os.getenv("AI_MODEL", "openrouter/free")
 # Message customization (adjust per client/server identity)
 # ---------------------------------------------------------
 BOT_NAME = os.getenv("BOT_NAME", "Assistant")
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "support@example.com")  # shown on /terms, /privacy, /refund - set this to a real inbox you check
 WELCOME_MESSAGE = os.getenv(
     "WELCOME_MESSAGE", "Welcome {member} to {guild}! 🎉"
 )

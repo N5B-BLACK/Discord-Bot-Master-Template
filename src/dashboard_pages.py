@@ -12,6 +12,8 @@ bodies aren't evaluated until called (by which point the whole module,
 including these constants, has finished loading).
 """
 
+import datetime
+
 import aiohttp
 import discord
 from aiohttp import web
@@ -26,6 +28,7 @@ from dashboard_core import (
     EMBED_BUILDER_STYLES,
     GUILD_LIST_STYLES,
     LANDING_STYLES,
+    LEGAL_STYLES,
     LOG_GROUPS,
     OVERVIEW_STYLES,
     SETTINGS_GROUPS,
@@ -46,6 +49,8 @@ from utils.chart_svg import bar_chart_svg, line_chart_svg
 from utils.embed_builder import LIMITS
 from utils.message_templates import TEMPLATE_SLOTS
 
+_TODAY = datetime.date.today().strftime("%B %d, %Y")
+
 # ---------------------------------------------------------
 # OAuth routes
 # ---------------------------------------------------------
@@ -60,6 +65,123 @@ async def login_start(request: web.Request) -> web.Response:
         "scope": "identify guilds",
     }
     return web.HTTPFound(f"{DISCORD_API}/oauth2/authorize?{urlencode(params)}")
+
+
+def _legal_page_shell(title: str, body_html: str) -> str:
+    """Shared wrapper for /terms, /privacy, /refund - public, no login required,
+    no sidebar (not guild-scoped). Kept as plain readable text rather than
+    cards/forms since these are documents, not app UI."""
+    bot_name = config.BOT_NAME or "this bot"
+    content = f"""
+    <div class="topbar">
+        <div class="brand"><span class="brand-dot"></span> {bot_name}</div>
+        <div class="spacer"></div>
+        <a class="link-btn" href="/login">Back</a>
+    </div>
+    <div class="container" style="max-width: 720px;">
+        <div class="eyebrow">Legal</div>
+        <h1>{title}</h1>
+        <div class="legal-body">{body_html}</div>
+    </div>
+    """
+    return _page_shell(f"{bot_name} · {title}", GUILD_LIST_STYLES + LEGAL_STYLES, content)
+
+
+async def terms_page(request: web.Request) -> web.Response:
+    bot_name = config.BOT_NAME or "this bot"
+    body = f"""
+    <p><em>Last updated: {_TODAY}</em></p>
+
+    <h2>1. Acceptance of terms</h2>
+    <p>By inviting {bot_name} to a Discord server, or by accessing its web dashboard, you agree to these Terms of Service. If you don't agree, don't use {bot_name}.</p>
+
+    <h2>2. What {bot_name} is</h2>
+    <p>{bot_name} is a Discord bot and companion web dashboard providing moderation, security, engagement, and community-management tools for Discord servers. A Free plan and a paid Pro plan are available; see the dashboard's Upgrade page for what each includes.</p>
+
+    <h2>3. Eligibility</h2>
+    <p>You must be able to form a binding contract to use {bot_name}, and must comply with Discord's own Terms of Service, including its minimum age requirement. Using {bot_name} to violate Discord's Terms of Service or Community Guidelines is a violation of these terms too.</p>
+
+    <h2>4. Subscriptions and billing</h2>
+    <p>The Pro plan is billed monthly on a recurring basis through Paddle.com, our payment processor and merchant of record. Paddle handles the actual charge, invoicing, and tax collection - {bot_name} never receives or stores your card details. You can cancel anytime from the dashboard's billing management page; Pro features remain active until the end of the current billing period. See our <a href="/refund">Refund Policy</a> for refund terms.</p>
+
+    <h2>5. Acceptable use</h2>
+    <p>You agree not to use {bot_name} to violate any law, harass or harm others, distribute malware, or attempt to abuse, reverse-engineer, or overload the service. We may suspend or terminate access for any account or server found doing so.</p>
+
+    <h2>6. Availability</h2>
+    <p>{bot_name} is provided on a best-effort basis. We don't guarantee uninterrupted availability and aren't liable for downtime, data loss, or moderation actions taken (or not taken) by the bot's automated systems.</p>
+
+    <h2>7. Termination</h2>
+    <p>You may stop using {bot_name} at any time by removing it from your server. We may suspend or terminate service to any server or account that violates these terms.</p>
+
+    <h2>8. Limitation of liability</h2>
+    <p>{bot_name} is provided "as is" without warranties of any kind. To the maximum extent permitted by law, we aren't liable for any indirect, incidental, or consequential damages arising from your use of the service.</p>
+
+    <h2>9. Changes to these terms</h2>
+    <p>We may update these terms from time to time. Continued use of {bot_name} after changes take effect constitutes acceptance of the updated terms.</p>
+
+    <h2>10. Contact</h2>
+    <p>Questions about these terms: <a href="mailto:{config.SUPPORT_EMAIL}">{config.SUPPORT_EMAIL}</a></p>
+    """
+    return web.Response(text=_legal_page_shell("Terms of Service", body), content_type="text/html")
+
+
+async def privacy_page(request: web.Request) -> web.Response:
+    bot_name = config.BOT_NAME or "this bot"
+    body = f"""
+    <p><em>Last updated: {_TODAY}</em></p>
+
+    <h2>1. What we collect</h2>
+    <p>
+        <strong>From Discord (via OAuth login):</strong> your Discord user ID, username, avatar, and the list of servers you have Manage Server permission in - used only to show you the right servers in the dashboard and verify you're allowed to configure them.<br><br>
+        <strong>Per-server settings:</strong> whatever you configure in the dashboard or via commands (channel IDs, role IDs, feature toggles, custom messages, embed drafts).<br><br>
+        <strong>Message content:</strong> not stored permanently. Messages are read transiently by moderation/security features (e.g. word filter, anti-spam) to decide whether to act, and by the AI chat feature (sent to our AI provider to generate a reply - see below). Brief summaries of moderation/security actions (e.g. "message deleted for banned word") are kept in the searchable Log History feature, but not full message contents.<br><br>
+        <strong>Leveling data:</strong> your Discord user ID and accumulated XP per server, to power leveling and leaderboards.<br><br>
+        <strong>Billing:</strong> we never see or store your card details. Payments are handled entirely by Paddle.com; we only store your Paddle customer/subscription ID and plan status.
+    </p>
+
+    <h2>2. How we use it</h2>
+    <p>To operate the bot and dashboard, enforce the settings you configure, provide AI chat replies, process subscription payments, and improve reliability. We don't sell your data, and we don't use message content for advertising.</p>
+
+    <h2>3. Third parties we share data with</h2>
+    <p>
+        <strong>Discord:</strong> all core functionality runs through Discord's API.<br>
+        <strong>Paddle.com:</strong> processes all payments as our merchant of record.<br>
+        <strong>OpenRouter (AI provider):</strong> if your server enables AI chat, the message you send is transmitted to OpenRouter to generate a reply.<br>
+        <strong>MongoDB Atlas:</strong> our database host, where server settings and the data described above are stored.
+    </p>
+
+    <h2>4. Data retention and deletion</h2>
+    <p>Server settings are kept as long as {bot_name} remains in your server. Removing the bot from your server does not automatically delete stored data; email <a href="mailto:{config.SUPPORT_EMAIL}">{config.SUPPORT_EMAIL}</a> to request deletion of your server's or your own data at any time.</p>
+
+    <h2>5. Children's privacy</h2>
+    <p>{bot_name} is only intended for use in compliance with Discord's own Terms of Service, which requires users to meet Discord's minimum age requirement. We don't knowingly collect data from anyone who doesn't meet that requirement.</p>
+
+    <h2>6. Changes to this policy</h2>
+    <p>We may update this policy from time to time; the "Last updated" date above will reflect the most recent change.</p>
+
+    <h2>7. Contact</h2>
+    <p>Privacy questions or data requests: <a href="mailto:{config.SUPPORT_EMAIL}">{config.SUPPORT_EMAIL}</a></p>
+    """
+    return web.Response(text=_legal_page_shell("Privacy Policy", body), content_type="text/html")
+
+
+async def refund_page(request: web.Request) -> web.Response:
+    body = f"""
+    <p><em>Last updated: {_TODAY}</em></p>
+
+    <h2>7-day money-back guarantee</h2>
+    <p>If you're a first-time Pro subscriber and aren't satisfied, contact us within 7 days of your initial payment for a full refund - no questions asked.</p>
+
+    <h2>After the first 7 days</h2>
+    <p>Subscriptions renew monthly. You can cancel anytime from the dashboard's billing page (Upgrade → Manage billing) - Pro features stay active until the end of the period you already paid for, but we don't offer partial-month refunds for time already used within a billing period.</p>
+
+    <h2>Billing errors</h2>
+    <p>If you were charged in error (e.g. duplicate charge, charged after cancelling), contact us and we'll refund it in full - this isn't subject to the 7-day window above.</p>
+
+    <h2>How to request a refund</h2>
+    <p>Email <a href="mailto:{config.SUPPORT_EMAIL}">{config.SUPPORT_EMAIL}</a> with the Discord server name and the email address used at checkout. Since Paddle.com processes our payments as merchant of record, refunds are issued through Paddle and typically appear on your statement within 5-10 business days.</p>
+    """
+    return web.Response(text=_legal_page_shell("Refund Policy", body), content_type="text/html")
 
 
 async def login(request: web.Request) -> web.Response:
@@ -93,6 +215,11 @@ async def login(request: web.Request) -> web.Response:
     </div>
     <div class="landing-features">
         {feature_cards}
+    </div>
+    <div style="text-align:center;padding:24px 16px 60px;">
+        <a href="/terms" class="link-btn" style="border:none;">Terms of Service</a>
+        <a href="/privacy" class="link-btn" style="border:none;">Privacy Policy</a>
+        <a href="/refund" class="link-btn" style="border:none;">Refund Policy</a>
     </div>
     """
     return web.Response(text=_page_shell(f"{bot_name} · Sign in", GUILD_LIST_STYLES + LANDING_STYLES + SETTINGS_STYLES, content), content_type="text/html")
