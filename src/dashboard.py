@@ -81,6 +81,7 @@ from dashboard_api import (
 
 
 def setup_dashboard_routes(app: web.Application, bot):
+    app.router.add_get("/", login)
     app.router.add_get("/login", login)
     app.router.add_get("/terms", terms_page)
     app.router.add_get("/privacy", privacy_page)

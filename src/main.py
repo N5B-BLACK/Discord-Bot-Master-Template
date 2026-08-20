@@ -103,7 +103,6 @@ async def health(request):
 
 async def start_webserver():
     app = web.Application()
-    app.router.add_get("/", health)
     app.router.add_get("/health", health)
     setup_dashboard_routes(app, bot)
     runner = web.AppRunner(app)
