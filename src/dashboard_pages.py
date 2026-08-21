@@ -184,6 +184,59 @@ async def refund_page(request: web.Request) -> web.Response:
     return web.Response(text=_legal_page_shell("Refund Policy", body), content_type="text/html")
 
 
+async def pricing_page(request: web.Request) -> web.Response:
+    """Public pricing page - no login required. Exists specifically so an
+    outside reviewer (e.g. Paddle's website approval process) or a prospective
+    customer can see actual prices without signing in with Discord first -
+    the dashboard's /dashboard/{guild_id}/upgrade page shows the same numbers
+    but sits behind OAuth + Manage Server permission, so it doesn't count as
+    a publicly visible pricing page."""
+    bot_name = config.BOT_NAME or "Bot Dashboard"
+    price = config.PRO_PRICE_DISPLAY
+    content = f"""
+    <div class="topbar">
+        <div class="brand"><span class="brand-dot"></span> {bot_name}</div>
+        <div class="spacer"></div>
+        <a class="link-btn" href="/login">Sign in</a>
+    </div>
+    <div class="landing-hero" style="padding-top:56px;">
+        <div class="eyebrow">Pricing</div>
+        <h1>Simple, two-tier pricing</h1>
+        <p class="subtitle">Free covers a full-featured community bot. Pro adds serious protection and premium extras. Cancel anytime.</p>
+    </div>
+    <div class="container" style="max-width: 840px; padding-top: 0;">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+            <div class="group" style="margin-bottom:0;">
+                <h2>Free</h2>
+                <p class="group-hint" style="font-size:24px;color:var(--ink);margin:0 0 16px;font-family:var(--font-display);">$0<span style="font-size:13px;color:var(--ink-dim);"> forever</span></p>
+                <p class="group-hint">Moderation (kick/ban/mute/warn)</p>
+                <p class="group-hint">Tickets, welcome messages, auto-role</p>
+                <p class="group-hint">Full custom embed builder</p>
+                <p class="group-hint">AI chat</p>
+                <p class="group-hint">Logs</p>
+                <p class="group-hint">Leveling with XP, rank cards, and role rewards</p>
+                <p class="group-hint">Reaction roles</p>
+            </div>
+            <div class="group" style="margin-bottom:0; border-color: var(--signal); border-width: 2px;">
+                <h2 style="color: var(--signal);">Pro</h2>
+                <p class="group-hint" style="font-size:24px;color:var(--ink);margin:0 0 16px;font-family:var(--font-display);">{price}</p>
+                <p class="group-hint">Everything in Free, plus:</p>
+                <p class="group-hint">Full security suite - anti-nuke, anti-spam, anti-link, word filter, anti-webhook, raid mode</p>
+                <p class="group-hint">Private member-owned voice rooms</p>
+                <p class="group-hint">Music</p>
+                <p class="group-hint">White-label dashboard branding</p>
+                <p class="group-hint">Advanced analytics and searchable log history</p>
+            </div>
+        </div>
+        <p class="group-hint" style="margin-top:20px;">Billed monthly, cancel anytime. See our <a href="/refund">Refund Policy</a> for details. Payments processed securely by <a href="https://paddle.com" target="_blank" rel="noopener">Paddle.com</a>, our merchant of record.</p>
+    </div>
+    """
+    return web.Response(
+        text=_page_shell(f"{bot_name} · Pricing", GUILD_LIST_STYLES + LANDING_STYLES + SETTINGS_STYLES, content),
+        content_type="text/html",
+    )
+
+
 async def login(request: web.Request) -> web.Response:
     """Landing page at /login - shown to anyone not signed in yet (first visit,
     expired session, or after logout), with a feature overview and a single
@@ -217,6 +270,7 @@ async def login(request: web.Request) -> web.Response:
         {feature_cards}
     </div>
     <div style="text-align:center;padding:24px 16px 60px;">
+        <a href="/pricing" class="link-btn" style="border:none;">Pricing</a>
         <a href="/terms" class="link-btn" style="border:none;">Terms of Service</a>
         <a href="/privacy" class="link-btn" style="border:none;">Privacy Policy</a>
         <a href="/refund" class="link-btn" style="border:none;">Refund Policy</a>

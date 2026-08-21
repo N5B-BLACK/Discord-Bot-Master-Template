@@ -32,6 +32,7 @@ from dashboard_pages import (
     logout,
     logs_page,
     overview_page,
+    pricing_page,
     privacy_page,
     refund_page,
     security_page,
@@ -84,6 +85,7 @@ def setup_dashboard_routes(app: web.Application, bot):
     app.router.add_get("/", login)
     app.router.add_get("/login", login)
     app.router.add_get("/terms", terms_page)
+    app.router.add_get("/pricing", pricing_page)
     app.router.add_get("/privacy", privacy_page)
     app.router.add_get("/refund", refund_page)
     app.router.add_get("/login/start", login_start)
